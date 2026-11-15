@@ -1,0 +1,25 @@
+# Entorno virtual
+.venv/
+
+# Secretos: NUNCA se suben
+.env
+
+# Base de datos local (historial de precios)
+data/
+*.db
+*.sqlite3
+
+# Archivos generados por Python y los tests
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Logs y archivos del editor y del sistema
+*.log
+.vscode/
+Thumbs.db
