@@ -204,3 +204,14 @@ def test_physical_without_serpapi_key(capsys):
     db.add_physical(conn, "Cafetera", 25000, query="cafetera")
     cli.cmd_check(Args(quiet=False, force=False), conn, cli.Clients())
     assert "Sin SERPAPI_KEY" in capsys.readouterr().out
+
+
+def test_suspicious_offer_never_alerts(capsys):
+    conn = db.connect(":memory:")
+    db.add_physical(conn, "Cafetera", 25000, query="cafetera")
+    offers = cafetera_offers(mediamarkt=27000, ebay=30000)
+    scam = Offer("La Specialista", "Bilma Boutique", "unknown", 6930, None, "https://x",
+                 suspicious=True)
+    cli.cmd_check(Args(quiet=True, force=False), conn,
+                  cli.Clients(serp=FakeSerp(offers + [scam])))
+    assert capsys.readouterr().out == ""      # ni 🔔 ni 🔎 por la oferta sospechosa

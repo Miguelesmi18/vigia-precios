@@ -7,6 +7,7 @@ def test_classify_shops():
     assert stores.classify("El Corte Inglés") == stores.RETAILER
     assert stores.classify("eBay - superofertas") == stores.MARKETPLACE
     assert stores.classify("AliExpress") == stores.MARKETPLACE
+    assert stores.classify("Alibaba.com") == stores.MARKETPLACE
     assert stores.classify("De'Longhi") == stores.OFFICIAL
     assert stores.classify("Tienda Rara 24") == stores.UNKNOWN
 

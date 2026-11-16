@@ -22,6 +22,7 @@ KEYSHOP_LABEL = "Tiendas de claves (GG.deals)"
 HISTORY_DAYS = 400   # días de historial de Steam que se piden para el análisis
 KEYSHOP_CHECKLIST = ("Comprueba en el enlace: que sea Steam KEY (no Account ni Gift), "
                      "región EUROPE o GLOBAL, y tienda de confianza (Instant Gaming, Eneba...)")
+SUSPICIOUS_TEXT = "⚠ PRECIO SOSPECHOSO: muy por debajo del resto, posible estafa o producto distinto"
 MARKETPLACE_CHECKLIST = ("Comprueba el vendedor, la garantía en España y que el producto "
                          "sea nuevo antes de comprar")
 
@@ -104,6 +105,8 @@ def cmd_shop(args, conn, clients):
         print(f"{euros(o.total_cents):>10}  {o.shop}  [{stores.LABELS[o.trust]}]")
         print(f"            {o.title[:70]}")
         print(f"            {euros(o.price_cents)} + {shipping_text(o.shipping_cents)}")
+        if o.suspicious:
+            print(f"            {SUSPICIOUS_TEXT}")
     print(f"\n(1 búsqueda de SerpApi usada; el plan gratuito da 250 al mes)")
     return 0
 
@@ -291,8 +294,11 @@ def check_physical(args, conn, clients, products):
                           checked_at=checked_at, trust=o.trust,
                           shipping_cents=o.shipping_cents)
 
-        best_trusted = next((o for o in offers if stores.is_trusted(o.trust)), None)
-        best_other = next((o for o in offers if not stores.is_trusted(o.trust)), None)
+        # Las ofertas sospechosamente baratas se guardan, pero nunca generan aviso
+        best_trusted = next((o for o in offers
+                             if stores.is_trusted(o.trust) and not o.suspicious), None)
+        best_other = next((o for o in offers
+                           if not stores.is_trusted(o.trust) and not o.suspicious), None)
 
         # Detector de ofertas falsas con TU historial (tiendas de confianza)
         verdict = None
@@ -325,8 +331,9 @@ def check_physical(args, conn, clients, products):
             if not offers:
                 print("   Sin resultados (revisa la búsqueda o el --model)")
             for o in list(best_per_shop.values())[:5]:
+                warn = "  ⚠ sospechoso" if o.suspicious else ""
                 print(f"   {euros(o.total_cents):>10}  {o.shop}  [{stores.LABELS[o.trust]}]  "
-                      f"({shipping_text(o.shipping_cents)})")
+                      f"({shipping_text(o.shipping_cents)}){warn}")
             if verdict:
                 print(f"      {verdict.summary()}")
             print()

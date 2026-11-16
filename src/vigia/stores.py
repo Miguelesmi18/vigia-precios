@@ -27,7 +27,7 @@ RETAILERS = [
     "tien21", "milar", "euronics", "apple", "game", "xtralife",
 ]
 MARKETPLACES = [
-    "ebay", "aliexpress", "temu", "miravia", "wallapop", "shein", "wish",
+    "ebay", "aliexpress", "alibaba", "temu", "miravia", "wallapop", "shein", "wish",
     "fruugo", "manomano", "rakuten", "cdiscount", "back market", "backmarket",
 ]
 BRANDS = [

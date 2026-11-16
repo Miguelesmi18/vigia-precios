@@ -6,6 +6,7 @@ Plan gratuito: 250 búsquedas al mes. Cada llamada a shopping() gasta UNA.
 
 import re
 from dataclasses import dataclass
+from statistics import median
 
 import requests
 
@@ -14,6 +15,9 @@ from vigia.itad import to_cents
 
 BASE_URL = "https://serpapi.com/search.json"
 TIMEOUT = 30
+# Una oferta por debajo de la mitad del precio mediano es sospechosa
+# (precio "demasiado bueno para ser verdad": posible estafa o producto distinto)
+SUSPICIOUS_RATIO = 0.5
 
 
 @dataclass
@@ -24,6 +28,7 @@ class Offer:
     price_cents: int
     shipping_cents: int | None    # None = Google no dice el envío
     link: str | None
+    suspicious: bool = False      # precio anormalmente bajo comparado con el resto
 
     @property
     def total_cents(self) -> int:
@@ -31,17 +36,42 @@ class Offer:
         return self.price_cents + (self.shipping_cents or 0)
 
 
+SHIPPING_WORDS = ("envío", "envio", "delivery", "shipping", "entrega")
+
+
 def parse_shipping(delivery: str | None) -> int | None:
     """'Envío gratis' -> 0, 'Envío: 4,99 €' -> 499, texto raro -> None."""
     if not delivery:
         return None
     text = delivery.lower()
-    if "gratis" in text or "free" in text:
+    if "gratis" in text or "gratuito" in text or "free" in text:
         return 0
     match = re.search(r"(\d+(?:[.,]\d{1,2})?)", text)
     if not match:
         return None
     return to_cents(match.group(1).replace(",", "."))
+
+
+def find_shipping(item: dict) -> int | None:
+    """Busca el envío en 'delivery' y, si no está, en 'extensions' y 'snippet'."""
+    candidates = [item.get("delivery")]
+    candidates += [str(e) for e in item.get("extensions", []) or []]
+    candidates.append(item.get("snippet"))
+    for text in candidates:
+        if text and any(w in text.lower() for w in SHIPPING_WORDS):
+            value = parse_shipping(text)
+            if value is not None:
+                return value
+    return None
+
+
+def flag_suspicious(offers: list["Offer"]) -> None:
+    """Marca las ofertas con un precio anormalmente bajo respecto al resto."""
+    if len(offers) < 3:
+        return
+    typical = median(o.total_cents for o in offers)
+    for o in offers:
+        o.suspicious = o.total_cents < typical * SUSPICIOUS_RATIO
 
 
 def matches_model(title: str, model: str | None) -> bool:
@@ -90,7 +120,8 @@ class SerpApiClient:
                 shop=shop,
                 trust=stores.classify(shop),
                 price_cents=to_cents(price),
-                shipping_cents=parse_shipping(item.get("delivery")),
+                shipping_cents=find_shipping(item),
                 link=item.get("product_link") or item.get("link"),
             ))
+        flag_suspicious(offers)
         return sorted(offers, key=lambda o: o.total_cents)

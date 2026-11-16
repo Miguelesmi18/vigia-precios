@@ -2,7 +2,8 @@
 
 from fakes import FakeSession
 
-from vigia.serpapi import SerpApiClient, matches_model, parse_shipping
+from vigia.serpapi import (Offer, SerpApiClient, find_shipping, flag_suspicious,
+                           matches_model, parse_shipping)
 
 
 def test_parse_shipping():
@@ -42,3 +43,18 @@ def test_shopping_parses_filters_and_sorts():
     assert offers[0].trust == "marketplace"
     params = session.calls[0][2]["params"]
     assert params["engine"] == "google_shopping" and params["gl"] == "es"
+
+
+def test_find_shipping_in_extensions():
+    assert find_shipping({"extensions": ["4,5 estrellas", "Envío gratuito"]}) == 0
+    assert find_shipping({"delivery": "Envío: 3,99 €"}) == 399
+    assert find_shipping({"extensions": ["Oferta"]}) is None
+
+
+def test_flag_suspicious_too_cheap():
+    offers = [Offer("x", "Bilma Boutique", "unknown", 6930, None, None),
+              Offer("x", "Amazon.es", "retailer", 27999, None, None),
+              Offer("x", "Leroy Merlin", "retailer", 28390, None, None),
+              Offer("x", "Suditel", "unknown", 35900, None, None)]
+    flag_suspicious(offers)
+    assert [o.suspicious for o in offers] == [True, False, False, False]
