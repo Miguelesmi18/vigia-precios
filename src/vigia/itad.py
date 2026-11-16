@@ -1,6 +1,9 @@
 """Conector a la API oficial de IsThereAnyDeal (solo tiendas autorizadas).
 
 Documentación: https://docs.isthereanydeal.com/
+Lo usamos para dos cosas:
+  1. Buscar juegos y saber su id de Steam.
+  2. Consultar el precio en Steam (shops=61), la única tienda oficial que nos interesa.
 """
 
 from dataclasses import dataclass
@@ -8,7 +11,8 @@ from dataclasses import dataclass
 import requests
 
 BASE_URL = "https://api.isthereanydeal.com"
-TIMEOUT = 15  # segundos
+TIMEOUT = 15        # segundos
+STEAM_SHOP_ID = 61  # id de Steam dentro de IsThereAnyDeal
 
 
 @dataclass
@@ -28,8 +32,8 @@ class Deal:
     url: str | None
 
 
-def to_cents(amount: float | int | None) -> int | None:
-    """Convierte 19.99 en 1999. round() evita errores como 19.99*100 = 1998.9999."""
+def to_cents(amount: float | int | str | None) -> int | None:
+    """Convierte 19.99 (o "19.99") en 1999. round() evita errores como 1998.9999."""
     if amount is None:
         return None
     return round(float(amount) * 100)
@@ -39,7 +43,7 @@ class ItadClient:
     def __init__(self, api_key: str, session: requests.Session | None = None):
         self.api_key = api_key
         self.session = session or requests.Session()
-        self.session.headers["User-Agent"] = "vigia-precios/0.1 (proyecto personal)"
+        self.session.headers["User-Agent"] = "vigia-precios/0.2 (proyecto personal)"
 
     def _request(self, method: str, path: str, params: dict | None = None,
                  json_body=None):
@@ -60,10 +64,17 @@ class ItadClient:
         return [Game(id=g["id"], title=g["title"], type=g.get("type"))
                 for g in data]
 
-    def prices(self, game_ids: list[str], country: str = "ES") -> dict[str, list[Deal]]:
-        """Precios actuales de varios juegos. Devuelve {id_juego: [ofertas]}."""
+    def prices(self, game_ids: list[str], country: str = "ES",
+               shops: list[int] | None = None) -> dict[str, list[Deal]]:
+        """Precios actuales de varios juegos. Devuelve {id_juego: [ofertas]}.
+
+        shops: lista de ids de tienda para filtrar (ej. [61] = solo Steam).
+        """
+        params = {"country": country}
+        if shops:
+            params["shops"] = ",".join(str(s) for s in shops)
         data = self._request("POST", "/games/prices/v3",
-                             params={"country": country}, json_body=game_ids)
+                             params=params, json_body=game_ids)
         result: dict[str, list[Deal]] = {}
         for item in data:
             deals = []
@@ -79,4 +90,20 @@ class ItadClient:
                     url=d.get("url"),
                 ))
             result[item["id"]] = deals
+        return result
+
+    def steam_appids(self, game_ids: list[str]) -> dict[str, int]:
+        """Busca el id de Steam de cada juego. Devuelve {id_itad: appid}.
+
+        La API responde con listas como ["app/1145360", "sub/12345"];
+        nos quedamos con el primer "app/".
+        """
+        data = self._request("POST", f"/lookup/shop/{STEAM_SHOP_ID}/id/v1",
+                             json_body=game_ids)
+        result = {}
+        for itad_id, shop_ids in (data or {}).items():
+            for sid in shop_ids or []:
+                if sid.startswith("app/"):
+                    result[itad_id] = int(sid.split("/", 1)[1])
+                    break
         return result

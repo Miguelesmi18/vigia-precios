@@ -1,53 +1,29 @@
-"""Tests del conector de IsThereAnyDeal SIN conexión a internet.
+"""Tests del conector de IsThereAnyDeal SIN conexión a internet."""
 
-Usamos un objeto falso (FakeSession) que devuelve respuestas preparadas.
-Así los tests son rápidos, gratis y no gastan peticiones de la API.
-"""
+from fakes import FakeSession
 
 from vigia.itad import ItadClient, to_cents
 
 
-class FakeResponse:
-    def __init__(self, data, status_code=200):
-        self._data = data
-        self.status_code = status_code
-
-    def json(self):
-        return self._data
-
-    def raise_for_status(self):
-        pass
-
-
-class FakeSession:
-    def __init__(self, data):
-        self.data = data
-        self.headers = {}
-        self.calls = []
-
-    def request(self, method, url, **kwargs):
-        self.calls.append((method, url, kwargs))
-        return FakeResponse(self.data)
-
-
 def test_to_cents_rounds_correctly():
     assert to_cents(19.99) == 1999
+    assert to_cents("24.30") == 2430
     assert to_cents(0.1 + 0.2) == 30
     assert to_cents(None) is None
 
 
-def test_search_parses_games():
+def test_search_parses_games_and_hides_key_from_url():
     session = FakeSession([{"id": "id-1", "slug": "hades", "title": "Hades", "type": "game"}])
     client = ItadClient("clave-falsa", session=session)
     games = client.search("hades")
     assert games[0].title == "Hades"
     method, url, kwargs = session.calls[0]
     assert method == "GET" and url.endswith("/games/search/v1")
-    # la clave va en la cabecera, no en la URL
     assert kwargs["headers"]["ITAD-API-Key"] == "clave-falsa"
+    assert "clave-falsa" not in url
 
 
-def test_prices_parses_deals_in_cents():
+def test_prices_filters_by_steam():
     session = FakeSession([{
         "id": "id-1",
         "deals": [{
@@ -59,8 +35,19 @@ def test_prices_parses_deals_in_cents():
         }],
     }])
     client = ItadClient("clave-falsa", session=session)
-    deals = client.prices(["id-1"], country="ES")["id-1"]
+    deals = client.prices(["id-1"], country="ES", shops=[61])["id-1"]
     assert deals[0].shop == "Steam"
     assert deals[0].price_cents == 1249
-    assert deals[0].regular_cents == 2499
-    assert session.calls[0][2]["params"] == {"country": "ES"}
+    assert session.calls[0][2]["params"] == {"country": "ES", "shops": "61"}
+
+
+def test_steam_appids_takes_first_app():
+    session = FakeSession({
+        "id-1": ["sub/999", "app/1145360"],
+        "id-2": ["sub/5"],          # sin "app/": no tiene página de juego en Steam
+    })
+    client = ItadClient("clave-falsa", session=session)
+    result = client.steam_appids(["id-1", "id-2"])
+    assert result == {"id-1": 1145360}
+    method, url, _ = session.calls[0]
+    assert method == "POST" and url.endswith("/lookup/shop/61/id/v1")

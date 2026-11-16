@@ -26,3 +26,9 @@ def get_itad_key() -> str:
             "Falta ITAD_API_KEY. Ponla en el archivo .env (nunca en el código)."
         )
     return key
+
+
+def get_ggdeals_key() -> str | None:
+    """Clave de GG.deals. Es opcional: sin ella solo se consulta Steam."""
+    key = os.getenv("GGDEALS_API_KEY", "").strip()
+    return key or None

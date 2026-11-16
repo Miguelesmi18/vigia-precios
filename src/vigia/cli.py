@@ -3,11 +3,22 @@
 import argparse
 import sqlite3
 import sys
+from dataclasses import dataclass
 
 import requests
 
 from vigia import config, db
-from vigia.itad import ItadClient
+from vigia.ggdeals import GgDealsClient
+from vigia.itad import STEAM_SHOP_ID, ItadClient
+
+KEYSHOP_LABEL = "Tiendas de claves (GG.deals)"
+KEYSHOP_WARNING = "⚠ tienda de claves: revisa región, plataforma y vendedor antes de comprar"
+
+
+@dataclass
+class Clients:
+    itad: ItadClient | None = None
+    gg: GgDealsClient | None = None    # None si no hay clave de GG.deals
 
 
 def euros(cents: int | None) -> str:
@@ -25,8 +36,8 @@ def parse_euros(text: str) -> int:
     return round(value * 100)
 
 
-def cmd_search(args, conn, client):
-    games = client.search(args.title)
+def cmd_search(args, conn, clients):
+    games = clients.itad.search(args.title)
     if not games:
         print("No he encontrado ningún juego con ese título.")
         return 1
@@ -35,22 +46,26 @@ def cmd_search(args, conn, client):
     return 0
 
 
-def cmd_add(args, conn, client):
-    games = client.search(args.title, results=1)
+def cmd_add(args, conn, clients):
+    games = clients.itad.search(args.title, results=1)
     if not games:
         print("No he encontrado ese juego. Prueba con 'vigia search'.")
         return 1
     game = games[0]
+    appid = clients.itad.steam_appids([game.id]).get(game.id)
     try:
-        pid = db.add_product(conn, game.title, args.target, itad_id=game.id)
+        pid = db.add_product(conn, game.title, args.target, itad_id=game.id,
+                             steam_appid=appid)
     except sqlite3.IntegrityError:  # ya estaba en la lista
         print(f"'{game.title}' ya estaba en la lista.")
         return 1
     print(f"Añadido #{pid}: {game.title} (aviso por debajo de {euros(args.target)})")
+    if appid is None:
+        print("   Ojo: no está en Steam, así que no se podrán comparar precios.")
     return 0
 
 
-def cmd_list(args, conn, client):
+def cmd_list(args, conn, clients):
     products = db.list_products(conn)
     if not products:
         print("No vigilas nada todavía. Usa: vigia add \"titulo\" 15")
@@ -60,7 +75,7 @@ def cmd_list(args, conn, client):
     return 0
 
 
-def cmd_remove(args, conn, client):
+def cmd_remove(args, conn, clients):
     if db.remove_product(conn, args.id):
         print(f"Eliminado #{args.id}.")
         return 0
@@ -68,38 +83,103 @@ def cmd_remove(args, conn, client):
     return 1
 
 
-def cmd_check(args, conn, client):
-    """Consulta precios, los guarda en el historial y avisa si bajan del objetivo."""
+def _fill_missing_appids(conn, clients, products):
+    """Juegos añadidos con la versión 0.1 no tienen id de Steam: se busca ahora."""
+    missing = [p for p in products if p["steam_appid"] is None]
+    if not missing:
+        return products
+    found = clients.itad.steam_appids([p["itad_id"] for p in missing])
+    for p in missing:
+        if p["itad_id"] in found:
+            db.set_steam_appid(conn, p["id"], found[p["itad_id"]])
+    return [p for p in db.list_products(conn) if p["itad_id"]]
+
+
+def cmd_check(args, conn, clients):
+    """Consulta Steam y tiendas de claves, guarda el historial y avisa."""
     products = [p for p in db.list_products(conn) if p["itad_id"]]
     if not products:
         if not args.quiet:
             print("No hay juegos que comprobar.")
         return 0
 
-    all_deals = client.prices([p["itad_id"] for p in products], country=config.COUNTRY)
+    products = _fill_missing_appids(conn, clients, products)
     checked_at = db.now_iso()
 
-    for p in products:
-        deals = all_deals.get(p["itad_id"], [])
-        for d in deals:
-            db.save_price(conn, p["id"], d.shop, d.price_cents, d.regular_cents,
-                          d.currency, d.url, checked_at=checked_at)
-        if not deals:
-            if not args.quiet:
-                print(f"{p['name']}: sin precios ahora mismo.")
-            continue
+    # 1) Steam, a través de IsThereAnyDeal (solo la tienda 61)
+    steam = clients.itad.prices([p["itad_id"] for p in products],
+                                country=config.COUNTRY, shops=[STEAM_SHOP_ID])
 
-        best = min(deals, key=lambda d: d.price_cents)
-        below = best.price_cents <= p["target_cents"]
-        if below:
-            print(f"🔔 {p['name']}: {euros(best.price_cents)} en {best.shop} "
-                  f"(-{best.cut}%, objetivo {euros(p['target_cents'])})")
-            if best.url:
-                print(f"   {best.url}")
-        elif not args.quiet:
-            print(f"{p['name']}: mejor precio {euros(best.price_cents)} en "
-                  f"{best.shop} (objetivo {euros(p['target_cents'])})")
+    # 2) Tiendas de claves, a través de GG.deals (si hay clave)
+    keyshops = {}
+    if clients.gg:
+        appids = [p["steam_appid"] for p in products if p["steam_appid"]]
+        if appids:
+            keyshops = clients.gg.prices(appids, region=config.COUNTRY)
+    elif not args.quiet:
+        print("(Sin GGDEALS_API_KEY en .env: solo se consulta Steam)\n")
+
+    for p in products:
+        target = p["target_cents"]
+        steam_deals = steam.get(p["itad_id"], [])
+        steam_best = min(steam_deals, key=lambda d: d.price_cents) if steam_deals else None
+        ks = keyshops.get(p["steam_appid"]) if p["steam_appid"] else None
+
+        # Guardar en el historial
+        if steam_best:
+            db.save_price(conn, p["id"], steam_best.shop, steam_best.price_cents,
+                          steam_best.regular_cents, steam_best.currency,
+                          steam_best.url, checked_at=checked_at, trust="official")
+        if ks and ks.keyshop_cents is not None:
+            db.save_price(conn, p["id"], KEYSHOP_LABEL, ks.keyshop_cents, None,
+                          ks.currency, ks.url, checked_at=checked_at, trust="keyshop")
+
+        # Avisos (los que van a Telegram)
+        if steam_best and steam_best.price_cents <= target:
+            print(f"🔔 {p['name']}: {euros(steam_best.price_cents)} en Steam "
+                  f"(-{steam_best.cut}%, objetivo {euros(target)})")
+            if steam_best.url:
+                print(f"   {steam_best.url}")
+        if ks and ks.keyshop_cents is not None and ks.keyshop_cents <= target:
+            print(f"🔔 {p['name']}: {euros(ks.keyshop_cents)} en tiendas de claves "
+                  f"(objetivo {euros(target)})")
+            print(f"   {KEYSHOP_WARNING}")
+            if ks.url:
+                print(f"   {ks.url}")
+
+        # Resumen completo (solo sin --quiet)
+        if not args.quiet:
+            print(f"{p['name']}  (objetivo {euros(target)})")
+            print(f"   Steam (oficial):    "
+                  f"{euros(steam_best.price_cents) if steam_best else 'sin precio'}")
+            if clients.gg:
+                if ks and ks.keyshop_cents is not None:
+                    print(f"   Tiendas de claves:  {euros(ks.keyshop_cents)}  "
+                          f"(mínimo histórico {euros(ks.keyshop_low_cents)})")
+                else:
+                    print("   Tiendas de claves:  sin precio")
+            print()
     return 0
+
+
+def describe_http_error(error: requests.RequestException, secrets: list[str]) -> str:
+    """Mensaje de error claro: qué API falló, el código y su explicación.
+
+    Nunca muestra la URL completa ni las claves (la de GG.deals va en la URL).
+    """
+    resp = getattr(error, "response", None)
+    if resp is None:
+        return f"Error de conexión: {type(error).__name__} (¿hay internet?)"
+    url = str(getattr(resp, "url", "") or "")
+    service = "GG.deals" if "gg.deals" in url else "IsThereAnyDeal"
+    try:
+        detail = resp.text or ""
+    except Exception:
+        detail = ""
+    for secret in secrets:
+        detail = detail.replace(secret, "***")
+    detail = " ".join(detail.split())[:300]
+    return f"Error de {service} ({resp.status_code}): {detail or 'sin detalles'}"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -137,13 +217,18 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     conn = db.connect(config.DB_PATH)
     try:
-        client = ItadClient(config.get_itad_key()) if args.needs_api else None
-        return args.func(args, conn, client)
+        clients = Clients()
+        if args.needs_api:
+            clients.itad = ItadClient(config.get_itad_key())
+            gg_key = config.get_ggdeals_key()
+            clients.gg = GgDealsClient(gg_key) if gg_key else None
+        return args.func(args, conn, clients)
     except RuntimeError as e:
         print(f"Error: {e}")
         return 2
     except requests.RequestException as e:
-        print(f"Error de conexión con la API: {e}")
+        secrets = [k for k in (config.get_ggdeals_key(),) if k]
+        print(describe_http_error(e, secrets))
         return 3
     finally:
         conn.close()
