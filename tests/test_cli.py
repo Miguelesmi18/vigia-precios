@@ -63,8 +63,8 @@ def test_check_only_asks_steam_and_alerts_keyshop(capsys):
 
     out = capsys.readouterr().out
     assert itad.last_shops == [61]                       # solo Steam
-    assert "11,99 € en tiendas de claves" in out         # aviso de keyshop
-    assert "revisa región" in out                        # con advertencia de riesgo
+    assert "posible chollo en tiendas de claves, 11,99 €" in out   # pista de keyshop
+    assert "Steam KEY (no Account ni Gift)" in out       # lista de comprobación
     assert "lejos del mínimo histórico (7,50 €)" in out  # análisis de la oferta
     assert "en Steam" not in out                         # Steam no baja del objetivo
     trusts = [h["trust"] for h in db.price_history(conn, pid)]
@@ -125,3 +125,11 @@ def test_check_summary_shows_steam_analysis(capsys):
     out = capsys.readouterr().out
     assert "Steam (oficial):    24,50 €" in out
     assert "mínimo histórico" in out
+
+
+def test_keyshop_alerts_can_be_disabled(capsys, monkeypatch):
+    monkeypatch.setenv("KEYSHOP_ALERTS", "off")
+    conn = db.connect(":memory:")
+    db.add_product(conn, "Hades", 1500, itad_id="id-1", steam_appid=1145360)
+    cli.cmd_check(Args(quiet=True), conn, cli.Clients(itad=FakeItad(2450), gg=FakeGg(1199)))
+    assert capsys.readouterr().out == ""      # Steam no baja y los keyshops están apagados

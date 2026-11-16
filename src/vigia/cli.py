@@ -14,7 +14,8 @@ from vigia.itad import STEAM_SHOP_ID, ItadClient
 
 KEYSHOP_LABEL = "Tiendas de claves (GG.deals)"
 HISTORY_DAYS = 400   # días de historial de Steam que se piden para el análisis
-KEYSHOP_WARNING = "⚠ tienda de claves: revisa región, plataforma y vendedor antes de comprar"
+KEYSHOP_CHECKLIST = ("Comprueba en el enlace: que sea Steam KEY (no Account ni Gift), "
+                     "región EUROPE o GLOBAL, y tienda de confianza (Instant Gaming, Eneba...)")
 
 
 @dataclass
@@ -156,11 +157,14 @@ def cmd_check(args, conn, clients):
             print(f"   {steam_verdict.summary()}")
             if steam_best.url:
                 print(f"   {steam_best.url}")
-        if ks and ks.keyshop_cents is not None and ks.keyshop_cents <= target:
-            print(f"🔔 {p['name']}: {euros(ks.keyshop_cents)} en tiendas de claves "
-                  f"(objetivo {euros(target)})")
+        if (ks and ks.keyshop_cents is not None and ks.keyshop_cents <= target
+                and config.keyshop_alerts_enabled()):
+            # Es una PISTA, no una compra segura: GG.deals no dice qué tienda es
+            # ni si es clave, regalo o cuenta.
+            print(f"🔎 {p['name']}: posible chollo en tiendas de claves, "
+                  f"{euros(ks.keyshop_cents)} (objetivo {euros(target)})")
             print(f"   {ks_verdict.summary()}")
-            print(f"   {KEYSHOP_WARNING}")
+            print(f"   {KEYSHOP_CHECKLIST}")
             if ks.url:
                 print(f"   {ks.url}")
 

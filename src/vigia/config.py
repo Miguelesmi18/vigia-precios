@@ -32,3 +32,8 @@ def get_ggdeals_key() -> str | None:
     """Clave de GG.deals. Es opcional: sin ella solo se consulta Steam."""
     key = os.getenv("GGDEALS_API_KEY", "").strip()
     return key or None
+
+
+def keyshop_alerts_enabled() -> bool:
+    """KEYSHOP_ALERTS=off en el .env desactiva los avisos de tiendas de claves."""
+    return os.getenv("KEYSHOP_ALERTS", "on").strip().lower() not in ("off", "0", "no", "false")
