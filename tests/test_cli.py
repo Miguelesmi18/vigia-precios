@@ -16,6 +16,11 @@ class FakeItad:
     def steam_appids(self, ids):
         return {"id-1": 1145360}
 
+    def history(self, game_id, country="ES", shops=None, since=None):
+        from datetime import datetime, timedelta, timezone
+        from vigia.analysis import PricePoint
+        return [PricePoint(datetime.now(timezone.utc) - timedelta(days=300), 2450)]
+
     def prices(self, ids, country="ES", shops=None):
         self.last_shops = shops
         return {"id-1": [Deal("Steam", self.steam_cents, 2450, "EUR", 0,
@@ -60,6 +65,7 @@ def test_check_only_asks_steam_and_alerts_keyshop(capsys):
     assert itad.last_shops == [61]                       # solo Steam
     assert "11,99 € en tiendas de claves" in out         # aviso de keyshop
     assert "revisa región" in out                        # con advertencia de riesgo
+    assert "lejos del mínimo histórico (7,50 €)" in out  # análisis de la oferta
     assert "en Steam" not in out                         # Steam no baja del objetivo
     trusts = [h["trust"] for h in db.price_history(conn, pid)]
     assert sorted(trusts) == ["keyshop", "official"]
@@ -110,3 +116,12 @@ def test_describe_http_error_itad():
     resp = FakeHttpResponse("https://api.isthereanydeal.com/games/prices/v3", 400, "bad shops")
     msg = cli.describe_http_error(requests.HTTPError(response=resp), [])
     assert msg == "Error de IsThereAnyDeal (400): bad shops"
+
+
+def test_check_summary_shows_steam_analysis(capsys):
+    conn = db.connect(":memory:")
+    db.add_product(conn, "Hades", 1500, itad_id="id-1", steam_appid=1145360)
+    cli.cmd_check(Args(quiet=False), conn, cli.Clients(itad=FakeItad(2450), gg=FakeGg(1199)))
+    out = capsys.readouterr().out
+    assert "Steam (oficial):    24,50 €" in out
+    assert "mínimo histórico" in out

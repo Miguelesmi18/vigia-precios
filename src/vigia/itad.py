@@ -7,8 +7,11 @@ Lo usamos para dos cosas:
 """
 
 from dataclasses import dataclass
+from datetime import datetime
 
 import requests
+
+from vigia.analysis import PricePoint
 
 BASE_URL = "https://api.isthereanydeal.com"
 TIMEOUT = 15        # segundos
@@ -107,3 +110,23 @@ class ItadClient:
                     result[itad_id] = int(sid.split("/", 1)[1])
                     break
         return result
+
+    def history(self, game_id: str, country: str = "ES", shops: list[int] | None = None,
+                since: datetime | None = None) -> list[PricePoint]:
+        """Registro de cambios de precio de un juego (el más antiguo primero)."""
+        params = {"id": game_id, "country": country}
+        if shops:
+            params["shops"] = ",".join(str(s) for s in shops)
+        if since:
+            params["since"] = since.isoformat(timespec="seconds")
+        data = self._request("GET", "/games/history/v2", params=params)
+        points = []
+        for entry in data or []:
+            price = ((entry.get("deal") or {}).get("price") or {})
+            if "amountInt" not in price:
+                continue
+            points.append(PricePoint(
+                timestamp=datetime.fromisoformat(entry["timestamp"]),
+                price_cents=int(price["amountInt"]),
+            ))
+        return sorted(points, key=lambda p: p.timestamp)

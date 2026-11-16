@@ -51,3 +51,22 @@ def test_steam_appids_takes_first_app():
     assert result == {"id-1": 1145360}
     method, url, _ = session.calls[0]
     assert method == "POST" and url.endswith("/lookup/shop/61/id/v1")
+
+
+def test_history_parses_price_log_in_cents():
+    session = FakeSession([
+        {"timestamp": "2026-11-20T10:00:00+01:00", "shop": {"id": 61, "name": "Steam"},
+         "deal": {"price": {"amount": 12.49, "amountInt": 1249, "currency": "EUR"},
+                  "regular": {"amount": 24.99, "amountInt": 2499, "currency": "EUR"},
+                  "cut": 50}},
+        {"timestamp": "2025-01-01T10:00:00+01:00", "shop": {"id": 61, "name": "Steam"},
+         "deal": {"price": {"amount": 24.99, "amountInt": 2499, "currency": "EUR"},
+                  "regular": {"amount": 24.99, "amountInt": 2499, "currency": "EUR"},
+                  "cut": 0}},
+    ])
+    client = ItadClient("clave-falsa", session=session)
+    points = client.history("id-1", shops=[61])
+    assert [p.price_cents for p in points] == [2499, 1249]     # ordenado por fecha
+    method, url, kwargs = session.calls[0]
+    assert method == "GET" and url.endswith("/games/history/v2")
+    assert kwargs["params"]["shops"] == "61"

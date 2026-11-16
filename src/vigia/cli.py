@@ -4,14 +4,16 @@ import argparse
 import sqlite3
 import sys
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 import requests
 
-from vigia import config, db
+from vigia import analysis, config, db
 from vigia.ggdeals import GgDealsClient
 from vigia.itad import STEAM_SHOP_ID, ItadClient
 
 KEYSHOP_LABEL = "Tiendas de claves (GG.deals)"
+HISTORY_DAYS = 400   # días de historial de Steam que se piden para el análisis
 KEYSHOP_WARNING = "⚠ tienda de claves: revisa región, plataforma y vendedor antes de comprar"
 
 
@@ -134,15 +136,30 @@ def cmd_check(args, conn, clients):
             db.save_price(conn, p["id"], KEYSHOP_LABEL, ks.keyshop_cents, None,
                           ks.currency, ks.url, checked_at=checked_at, trust="keyshop")
 
+        # Análisis de la oferta (detector de ofertas falsas)
+        steam_verdict = None
+        if steam_best:
+            now = datetime.now(timezone.utc)
+            points = clients.itad.history(p["itad_id"], country=config.COUNTRY,
+                                          shops=[STEAM_SHOP_ID],
+                                          since=now - timedelta(days=HISTORY_DAYS))
+            steam_verdict = analysis.analyze(points, steam_best.price_cents,
+                                             steam_best.cut, now)
+        ks_verdict = None
+        if ks and ks.keyshop_cents is not None:
+            ks_verdict = analysis.compare_to_low(ks.keyshop_cents, ks.keyshop_low_cents)
+
         # Avisos (los que van a Telegram)
         if steam_best and steam_best.price_cents <= target:
             print(f"🔔 {p['name']}: {euros(steam_best.price_cents)} en Steam "
                   f"(-{steam_best.cut}%, objetivo {euros(target)})")
+            print(f"   {steam_verdict.summary()}")
             if steam_best.url:
                 print(f"   {steam_best.url}")
         if ks and ks.keyshop_cents is not None and ks.keyshop_cents <= target:
             print(f"🔔 {p['name']}: {euros(ks.keyshop_cents)} en tiendas de claves "
                   f"(objetivo {euros(target)})")
+            print(f"   {ks_verdict.summary()}")
             print(f"   {KEYSHOP_WARNING}")
             if ks.url:
                 print(f"   {ks.url}")
@@ -150,12 +167,16 @@ def cmd_check(args, conn, clients):
         # Resumen completo (solo sin --quiet)
         if not args.quiet:
             print(f"{p['name']}  (objetivo {euros(target)})")
-            print(f"   Steam (oficial):    "
-                  f"{euros(steam_best.price_cents) if steam_best else 'sin precio'}")
+            if steam_best:
+                cut = f" (-{steam_best.cut}%)" if steam_best.cut else ""
+                print(f"   Steam (oficial):    {euros(steam_best.price_cents)}{cut}")
+                print(f"      {steam_verdict.summary()}")
+            else:
+                print("   Steam (oficial):    sin precio")
             if clients.gg:
-                if ks and ks.keyshop_cents is not None:
-                    print(f"   Tiendas de claves:  {euros(ks.keyshop_cents)}  "
-                          f"(mínimo histórico {euros(ks.keyshop_low_cents)})")
+                if ks_verdict:
+                    print(f"   Tiendas de claves:  {euros(ks.keyshop_cents)}")
+                    print(f"      {ks_verdict.summary()}")
                 else:
                     print("   Tiendas de claves:  sin precio")
             print()
