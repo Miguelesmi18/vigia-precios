@@ -37,3 +37,14 @@ def get_ggdeals_key() -> str | None:
 def keyshop_alerts_enabled() -> bool:
     """KEYSHOP_ALERTS=off en el .env desactiva los avisos de tiendas de claves."""
     return os.getenv("KEYSHOP_ALERTS", "on").strip().lower() not in ("off", "0", "no", "false")
+
+
+def get_serpapi_key() -> str | None:
+    """Clave de SerpApi. Opcional: sin ella no se vigilan productos físicos."""
+    key = os.getenv("SERPAPI_KEY", "").strip()
+    return key or None
+
+
+# Horas mínimas entre dos consultas del mismo producto físico (ahorra búsquedas:
+# el plan gratuito de SerpApi da 250 al mes)
+PHYSICAL_INTERVAL_HOURS = float(os.getenv("PHYSICAL_INTERVAL_HOURS", "20"))

@@ -133,3 +133,74 @@ def test_keyshop_alerts_can_be_disabled(capsys, monkeypatch):
     db.add_product(conn, "Hades", 1500, itad_id="id-1", steam_appid=1145360)
     cli.cmd_check(Args(quiet=True), conn, cli.Clients(itad=FakeItad(2450), gg=FakeGg(1199)))
     assert capsys.readouterr().out == ""      # Steam no baja y los keyshops están apagados
+
+
+# ---------------------------------------------------------------- productos físicos
+
+from vigia.serpapi import Offer
+
+
+class FakeSerp:
+    def __init__(self, offers):
+        self.offers = offers
+        self.calls = 0
+
+    def shopping(self, query, country="es", language="es", model=None):
+        self.calls += 1
+        return sorted(self.offers, key=lambda o: o.total_cents)
+
+
+def cafetera_offers(mediamarkt=25900, ebay=23900):
+    return [
+        Offer("De'Longhi ECAM22.110.B", "MediaMarkt", "retailer", mediamarkt, 0, "https://mm"),
+        Offer("De'Longhi ECAM22.110.B", "eBay - vendedor", "marketplace", ebay, 999, "https://eb"),
+    ]
+
+
+def test_add_product_and_list(capsys):
+    conn = db.connect(":memory:")
+    cli.cmd_add_product(Args(name="Cafetera", target=25000, query=None, model="ECAM22.110"),
+                        conn, cli.Clients())
+    cli.cmd_list(Args(), conn, cli.Clients())
+    out = capsys.readouterr().out
+    assert "(producto)  Cafetera" in out and "modelo ECAM22.110" in out
+
+
+def test_physical_alert_trusted_shop(capsys):
+    conn = db.connect(":memory:")
+    pid = db.add_physical(conn, "Cafetera", 26000, query="cafetera", model=None)
+    serp = FakeSerp(cafetera_offers(mediamarkt=25900, ebay=30000))
+    cli.cmd_check(Args(quiet=True, force=False), conn, cli.Clients(serp=serp))
+    out = capsys.readouterr().out
+    assert "🔔 Cafetera: 259,00 € en MediaMarkt (envío gratis" in out
+    assert len(db.price_history(conn, pid)) == 2            # una fila por tienda
+
+
+def test_physical_marketplace_is_only_a_hint(capsys):
+    conn = db.connect(":memory:")
+    db.add_physical(conn, "Cafetera", 25000, query="cafetera")
+    serp = FakeSerp(cafetera_offers(mediamarkt=25900, ebay=23900))   # eBay: 248,99 con envío
+    cli.cmd_check(Args(quiet=True, force=False), conn, cli.Clients(serp=serp))
+    out = capsys.readouterr().out
+    assert "🔔" not in out                                   # MediaMarkt no baja del objetivo
+    assert "🔎 Cafetera: 248,99 € en eBay - vendedor" in out
+    assert "garantía en España" in out
+
+
+def test_physical_checked_once_per_interval():
+    conn = db.connect(":memory:")
+    db.add_physical(conn, "Cafetera", 25000, query="cafetera")
+    serp = FakeSerp(cafetera_offers())
+    clients = cli.Clients(serp=serp)
+    cli.cmd_check(Args(quiet=True, force=False), conn, clients)
+    cli.cmd_check(Args(quiet=True, force=False), conn, clients)   # demasiado pronto
+    assert serp.calls == 1
+    cli.cmd_check(Args(quiet=True, force=True), conn, clients)    # --force
+    assert serp.calls == 2
+
+
+def test_physical_without_serpapi_key(capsys):
+    conn = db.connect(":memory:")
+    db.add_physical(conn, "Cafetera", 25000, query="cafetera")
+    cli.cmd_check(Args(quiet=False, force=False), conn, cli.Clients())
+    assert "Sin SERPAPI_KEY" in capsys.readouterr().out

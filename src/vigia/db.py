@@ -15,6 +15,8 @@ CREATE TABLE IF NOT EXISTS products (
     kind          TEXT    NOT NULL DEFAULT 'game',   -- 'game' o 'physical'
     itad_id       TEXT,                              -- id del juego en IsThereAnyDeal
     steam_appid   INTEGER,                           -- id del juego en Steam
+    query         TEXT,                              -- texto de búsqueda (productos físicos)
+    model         TEXT,                              -- código de modelo obligatorio en el título
     target_cents  INTEGER NOT NULL,                  -- precio objetivo en céntimos
     created_at    TEXT    NOT NULL,
     UNIQUE (kind, itad_id)
@@ -25,7 +27,8 @@ CREATE TABLE IF NOT EXISTS prices (
     product_id     INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
     shop           TEXT    NOT NULL,
     trust          TEXT    NOT NULL DEFAULT 'official', -- 'official' o 'keyshop'
-    price_cents    INTEGER NOT NULL,
+    price_cents    INTEGER NOT NULL,                  -- precio FINAL (con envío si se conoce)
+    shipping_cents INTEGER,
     regular_cents  INTEGER,
     currency       TEXT    NOT NULL,
     url            TEXT,
@@ -41,6 +44,9 @@ CREATE INDEX IF NOT EXISTS idx_prices_product_date
 MIGRATIONS = [
     ("products", "steam_appid", "INTEGER"),
     ("prices", "trust", "TEXT NOT NULL DEFAULT 'official'"),
+    ("products", "query", "TEXT"),
+    ("products", "model", "TEXT"),
+    ("prices", "shipping_cents", "INTEGER"),
 ]
 
 
@@ -98,13 +104,14 @@ def remove_product(conn, product_id: int) -> bool:
 
 def save_price(conn, product_id: int, shop: str, price_cents: int,
                regular_cents: int | None, currency: str, url: str | None,
-               checked_at: str | None = None, trust: str = "official") -> None:
+               checked_at: str | None = None, trust: str = "official",
+               shipping_cents: int | None = None) -> None:
     """Guarda un precio en el historial."""
     conn.execute(
         "INSERT INTO prices (product_id, shop, trust, price_cents, regular_cents, "
-        "currency, url, checked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "currency, url, checked_at, shipping_cents) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (product_id, shop, trust, price_cents, regular_cents, currency, url,
-         checked_at or now_iso()),
+         checked_at or now_iso(), shipping_cents),
     )
     conn.commit()
 
@@ -113,4 +120,33 @@ def price_history(conn, product_id: int) -> list[sqlite3.Row]:
     return conn.execute(
         "SELECT * FROM prices WHERE product_id = ? ORDER BY checked_at",
         (product_id,),
+    ).fetchall()
+
+
+def add_physical(conn, name: str, target_cents: int, query: str,
+                 model: str | None = None) -> int:
+    """Añade un producto físico (cafetera, auriculares...) a vigilar."""
+    cur = conn.execute(
+        "INSERT INTO products (name, kind, query, model, target_cents, created_at) "
+        "VALUES (?, 'physical', ?, ?, ?, ?)",
+        (name, query, model, target_cents, now_iso()),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def last_checked(conn, product_id: int) -> str | None:
+    row = conn.execute("SELECT MAX(checked_at) AS last FROM prices WHERE product_id = ?",
+                       (product_id,)).fetchone()
+    return row["last"]
+
+
+def best_price_per_check(conn, product_id: int, trusts: tuple[str, ...]) -> list[sqlite3.Row]:
+    """El precio más bajo de cada comprobación, solo de las tiendas indicadas."""
+    marks = ",".join("?" for _ in trusts)
+    return conn.execute(
+        f"SELECT checked_at, MIN(price_cents) AS price_cents FROM prices "
+        f"WHERE product_id = ? AND trust IN ({marks}) "
+        f"GROUP BY checked_at ORDER BY checked_at",
+        (product_id, *trusts),
     ).fetchall()
