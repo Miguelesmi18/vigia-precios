@@ -34,8 +34,16 @@ BRANDS = [
     "de'longhi", "delonghi", "philips", "krups", "nespresso", "cecotec", "melitta",
     "siemens", "bosch", "saeco", "sage", "breville", "dolce gusto", "jura",
     "samsung", "xiaomi", "lg", "sony", "nintendo", "playstation", "lenovo", "hp",
-    "asus", "logitech", "dyson", "rowenta", "moulinex", "tefal", "taurus", "smeg",
+    "asus", "logitech", "razer", "8bitdo", "steelseries", "corsair", "hyperx", "dyson", "rowenta", "moulinex", "tefal", "taurus", "smeg",
 ]
+
+# "Amazon.es - Seller", "vendedor externo"...: vende un tercero, no la tienda
+THIRD_PARTY_WORDS = ["seller", "vendedor", "marketplace"]
+
+# Tiendas fuera de España: envío más caro, posibles aduanas y garantía distinta
+FOREIGN_TLDS = ["de", "fr", "it", "uk", "ua", "pl", "nl", "be", "at", "ch", "cz", "ro",
+                "hu", "se", "dk", "no", "fi", "cn", "hk", "jp", "us", "ru", "tr", "lt", "lv"]
+FOREIGN_SHOPS = ["play-asia", "ldlc"]
 
 # Palabras que indican producto usado o reacondicionado (se descartan)
 SECOND_HAND_WORDS = ["reacondicionado", "reacondicionada", "segunda mano", "usado",
@@ -49,14 +57,31 @@ def _contains(name: str, terms: list[str]) -> bool:
 
 def classify(shop: str) -> str:
     name = (shop or "").lower()
-    # Primero marketplaces: "eBay - tienda X" no debe contar como tienda grande
-    if _contains(name, MARKETPLACES):
+    # Primero marketplaces: "eBay - tienda X" o "Amazon.es - Seller" no cuentan
+    # como tienda grande
+    if _contains(name, MARKETPLACES) or _contains(name, THIRD_PARTY_WORDS):
         return MARKETPLACE
     if _contains(name, RETAILERS):
         return RETAILER
     if _contains(name, BRANDS):
         return OFFICIAL
     return UNKNOWN
+
+
+def is_foreign(shop: str) -> bool:
+    """¿Tienda de fuera de España? Por el dominio (.de, .ua...) o por nombre conocido."""
+    name = (shop or "").lower()
+    if _contains(name, FOREIGN_SHOPS):
+        return True
+    return any(re.search(rf"\.{tld}(?!\w)", name) for tld in FOREIGN_TLDS)
+
+
+def describe(shop: str, level: str) -> str:
+    """Texto de confianza para mostrar: 'gran tienda', 'tienda desconocida · extranjera'..."""
+    label = LABELS[level]
+    if is_foreign(shop):
+        label += " · extranjera: revisa envío, aduanas y garantía"
+    return label
 
 
 def is_trusted(level: str) -> bool:

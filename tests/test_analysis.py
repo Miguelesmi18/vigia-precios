@@ -63,3 +63,12 @@ def test_keyshop_compare_to_low():
     assert compare_to_low(847, 490).level == NORMAL
     assert "lejos" in compare_to_low(847, 490).summary()
     assert compare_to_low(847, None).level == UNKNOWN
+
+
+def test_one_day_of_history_is_not_a_historic_low():
+    """Primera consulta de un producto: no se puede decir que sea mínimo histórico."""
+    points = [PricePoint(NOW - timedelta(hours=1), 27990)]
+    v = analyze(points, current_cents=27990, cut=1, now=NOW)
+    assert v.level == UNKNOWN
+    assert "historial" in v.summary()
+    assert "mínimo histórico" not in v.summary()

@@ -18,6 +18,7 @@ from datetime import datetime, timedelta
 from statistics import median
 
 WINDOW = timedelta(days=30)        # ventana de la regla Omnibus
+MIN_HISTORY = timedelta(days=7)    # con menos historial no se puede juzgar nada
 BASELINE = timedelta(days=90)      # periodo para calcular el precio "habitual"
 INFLATION_MARGIN = 1.10            # +10 % = subida sospechosa
 NEAR_LOW_MARGIN = 1.10             # hasta +10 % del mínimo = "cerca del mínimo"
@@ -94,6 +95,13 @@ def analyze(points: list[PricePoint], current_cents: int, cut: int,
     points = sorted(points, key=lambda p: p.timestamp)
     if not points:
         return Verdict(UNKNOWN, ["no hay historial de precios"])
+
+    # Con muy poco historial, "mínimo histórico" no significa nada
+    span = now - points[0].timestamp
+    if span < MIN_HISTORY:
+        days = max(span.days, 0)
+        return Verdict(UNKNOWN, [f"solo {days} día(s) de historial; "
+                                 f"hacen falta {MIN_HISTORY.days} para valorar la oferta"])
 
     reasons: list[str] = []
     level = NORMAL

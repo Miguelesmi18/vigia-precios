@@ -102,7 +102,7 @@ def cmd_shop(args, conn, clients):
         print("Sin resultados nuevos (se descartan usados y reacondicionados).")
         return 1
     for o in offers[:args.limit]:
-        print(f"{euros(o.total_cents):>10}  {o.shop}  [{stores.LABELS[o.trust]}]")
+        print(f"{euros(o.total_cents):>10}  {o.shop}  [{stores.describe(o.shop, o.trust)}]")
         print(f"            {o.title[:70]}")
         print(f"            {euros(o.price_cents)} + {shipping_text(o.shipping_cents)}")
         if o.suspicious:
@@ -320,7 +320,7 @@ def check_physical(args, conn, clients, products):
         if (best_other and best_other.total_cents <= target
                 and (not best_trusted or best_other.total_cents < best_trusted.total_cents)):
             print(f"🔎 {p['name']}: {euros(best_other.total_cents)} en {best_other.shop} "
-                  f"[{stores.LABELS[best_other.trust]}] (objetivo {euros(target)})")
+                  f"[{stores.describe(best_other.shop, best_other.trust)}] (objetivo {euros(target)})")
             print(f"   {MARKETPLACE_CHECKLIST}")
             if best_other.link:
                 print(f"   {best_other.link}")
@@ -332,7 +332,7 @@ def check_physical(args, conn, clients, products):
                 print("   Sin resultados (revisa la búsqueda o el --model)")
             for o in list(best_per_shop.values())[:5]:
                 warn = "  ⚠ sospechoso" if o.suspicious else ""
-                print(f"   {euros(o.total_cents):>10}  {o.shop}  [{stores.LABELS[o.trust]}]  "
+                print(f"   {euros(o.total_cents):>10}  {o.shop}  [{stores.describe(o.shop, o.trust)}]  "
                       f"({shipping_text(o.shipping_cents)}){warn}")
             if verdict:
                 print(f"      {verdict.summary()}")
