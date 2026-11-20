@@ -2,7 +2,7 @@
 
 Juegos:            vigia search | add
 Productos físicos: vigia shop | add-product
-Comunes:           vigia list | remove | check
+Comunes:           vigia list | remove | check | report
 """
 
 import argparse
@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 
 import requests
 
-from vigia import analysis, config, db, stores
+from vigia import analysis, config, db, report, stores
 from vigia.ggdeals import GgDealsClient
 from vigia.itad import STEAM_SHOP_ID, ItadClient
 from vigia.serpapi import SerpApiClient
@@ -154,6 +154,12 @@ def cmd_list(args, conn, clients):
         extra = f"  [modelo {p['model']}]" if p["model"] else ""
         print(f"#{p['id']}  ({kind})  {p['name']}  -> objetivo "
               f"{euros(p['target_cents'])}{extra}")
+    return 0
+
+
+def cmd_report(args, conn, clients):
+    """Resumen de los últimos días (lo usa la tarea semanal de Hermes)."""
+    print(report.build_report(conn, days=args.days))
     return 0
 
 
@@ -425,6 +431,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("list", help="Ver lo que vigilas")
     p.set_defaults(func=cmd_list, needs_api=False)
+
+    p = sub.add_parser("report", help="Resumen de precios de los últimos días")
+    p.add_argument("--days", type=int, default=7, help="Días a resumir (por defecto 7)")
+    p.set_defaults(func=cmd_report, needs_api=False)
 
     p = sub.add_parser("remove", help="Dejar de vigilar")
     p.add_argument("id", type=int)
