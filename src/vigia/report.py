@@ -210,10 +210,15 @@ def render_product(s: ProductSummary, days_to_bf: int | None) -> list[str]:
         if series.label == "Claves" and series.url:
             # GG.deals no dice qué tienda es: en su página salen ordenadas por precio
             lines.append(f"      🔗 Ver en qué tienda está: {series.url}")
+        elif s.kind == "physical" and series.url:
+            # Ficha de Google Shopping con la oferta de esa tienda y su botón
+            lines.append(f"      🔗 Ver la oferta: {series.url}")
     if s.extra:
         seen = f", visto el {s.extra.seen_on}" if s.extra.seen_on else ""
         trust = f" ({s.extra_trust}{seen})" if s.extra_trust or seen else ""
         lines.append(f"   🔎 {s.extra.shop}: {euros(s.extra.last)}{trust} · solo como pista")
+        if s.extra.url:
+            lines.append(f"      🔗 {s.extra.url}")
     lines.append(f"   {advice(s, days_to_bf)}")
     return lines
 

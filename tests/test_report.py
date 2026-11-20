@@ -104,3 +104,14 @@ def test_outlier_and_old_other_shop():
     assert "1499" not in text and "1.499" not in text
     assert "▁█" in text                       # gráfica sin el pico absurdo
     assert "🔎 makro-falso.es: 250,00 € (fuera de tu lista de confianza, visto el 16/11)" in text
+
+
+def test_physical_products_include_offer_link():
+    conn = db.connect(":memory:")
+    pid = db.add_physical(conn, "Mando", 4500, query="mando")
+    db.save_price(conn, pid, "PcComponentes", 5499, None, "EUR",
+                  "https://www.google.com/shopping/product/123",
+                  checked_at="2026-11-19T09:00:00+00:00", trust="retailer")
+    text = build_report(conn, now=NOW, include_server=False)
+    assert "🏬 PcComponentes: 54,99 €" in text
+    assert "🔗 Ver la oferta: https://www.google.com/shopping/product/123" in text
