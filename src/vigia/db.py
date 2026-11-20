@@ -212,3 +212,14 @@ def latest_prices(conn, product_id: int) -> list[sqlite3.Row]:
         "(SELECT MAX(checked_at) FROM prices WHERE product_id = ?) ORDER BY price_cents",
         (product_id, product_id),
     ).fetchall()
+
+
+def conn_price_at(conn, product_id: int, trusts: tuple[str, ...], checked_at: str,
+                  price_cents: int):
+    """La fila (tienda, confianza) que tenía ese precio en esa comprobación."""
+    marks = ",".join("?" for _ in trusts)
+    return conn.execute(
+        f"SELECT * FROM prices WHERE product_id = ? AND checked_at = ? AND price_cents = ? "
+        f"AND trust IN ({marks}) LIMIT 1",
+        (product_id, checked_at, price_cents, *trusts),
+    ).fetchone()

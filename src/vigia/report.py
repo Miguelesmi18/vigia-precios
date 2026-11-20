@@ -5,12 +5,14 @@ y un consejo orientativo de compra.
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from statistics import median
 
 from vigia import config, db, stores
 
 SPARK_CHARS = "▁▂▃▄▅▆▇█"
 NEAR_TARGET = 0.10           # a menos de un 10 % del objetivo = 🟡
 MAX_SPARK_POINTS = 8         # puntos de la minigráfica
+OUTLIER_RATIO = 1.6          # precios > 1,6 x la mediana se descartan (otro producto, packs...)
 
 
 def euros(cents: int) -> str:
@@ -90,6 +92,8 @@ class Series:
     icon: str
     shop: str
     prices: list[int]
+    seen_on: str | None = None    # fecha del último precio si NO es de la última comprobación
+    trust: str = ""               # confianza de la tienda del último precio
 
     @property
     def last(self) -> int:
@@ -133,9 +137,19 @@ def _series(conn, product_id: int, trusts: tuple[str, ...], since: str,
             if r["checked_at"] >= since]
     if not rows:
         return None
-    latest = [r for r in db.latest_prices(conn, product_id) if r["trust"] in trusts]
-    shop = latest[0]["shop"] if latest else label
-    return Series(label, icon, shop, [r["price_cents"] for r in rows])
+    # Fuera precios absurdos (un pack, otro modelo...) que deformarían la gráfica
+    typical = median(r["price_cents"] for r in rows)
+    rows = [r for r in rows if r["price_cents"] <= typical * OUTLIER_RATIO]
+    last = rows[-1]
+    # La tienda del último precio de ESTE grupo (puede no ser la última comprobación)
+    shop_row = db.conn_price_at(conn, product_id, trusts, last["checked_at"],
+                                last["price_cents"])
+    shop = shop_row["shop"] if shop_row else label
+    seen_on = None
+    if last["checked_at"] != db.last_checked(conn, product_id):
+        seen_on = datetime.fromisoformat(last["checked_at"]).astimezone().strftime("%d/%m")
+    return Series(label, icon, shop, [r["price_cents"] for r in rows], seen_on,
+                  shop_row["trust"] if shop_row else "")
 
 
 def summarize_product(conn, p, since: str) -> ProductSummary:
@@ -155,10 +169,8 @@ def summarize_product(conn, p, since: str) -> ProductSummary:
                         "Otras tiendas", "🔎")
         if other and (not trusted or other.last < trusted.last):
             s.extra = other
-            latest = [r for r in db.latest_prices(conn, p["id"])
-                      if r["trust"] in (stores.MARKETPLACE, stores.UNKNOWN)]
-            if latest:
-                s.extra_trust = stores.describe(latest[0]["shop"], latest[0]["trust"])
+            if other.trust:
+                s.extra_trust = stores.describe(other.shop, other.trust)
     return s
 
 
@@ -188,13 +200,15 @@ def render_product(s: ProductSummary, days_to_bf: int | None) -> list[str]:
         gap_text = "✔ a tu precio" if gap <= 0 else f"faltan {euros(gap)}"
         where = series.label if s.kind == "game" else series.shop
         spark = sparkline(series.prices)
-        lines.append(f"   {series.icon} {where}: {euros(series.last)} · {gap_text}"
+        seen = f" (visto el {series.seen_on})" if series.seen_on else ""
+        lines.append(f"   {series.icon} {where}: {euros(series.last)}{seen} · {gap_text}"
                      f"{'  ' + spark if spark else ''} · {trend_text(series.prices[0], series.last)}")
         if series.lowest < series.last:
             lines.append(f"      (mínimo de la semana: {euros(series.lowest)})")
     if s.extra:
-        lines.append(f"   🔎 {s.extra.shop}: {euros(s.extra.last)} ({s.extra_trust}) · "
-                     f"solo como pista")
+        seen = f", visto el {s.extra.seen_on}" if s.extra.seen_on else ""
+        trust = f" ({s.extra_trust}{seen})" if s.extra_trust or seen else ""
+        lines.append(f"   🔎 {s.extra.shop}: {euros(s.extra.last)}{trust} · solo como pista")
     lines.append(f"   {advice(s, days_to_bf)}")
     return lines
 

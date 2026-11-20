@@ -13,9 +13,20 @@ def test_classify_shops():
 
 
 def test_whole_words_only():
-    # "game" (la tienda GAME) no debe coincidir dentro de otra palabra
-    assert stores.classify("Gameseal") == stores.UNKNOWN
-    assert stores.classify("GAME") == stores.RETAILER
+    # "fnac" no debe coincidir dentro de otra palabra
+    assert stores.classify("Fnacshop24") == stores.UNKNOWN
+    assert stores.classify("Fnac") == stores.RETAILER
+
+
+def test_only_your_trusted_shops_and_brands(monkeypatch):
+    for shop in ["Amazon.es", "MediaMarkt", "El Corte Inglés", "Carrefour", "Fnac",
+                 "PcComponentes", "delonghi.es", "Razer.com"]:
+        assert stores.is_trusted(stores.classify(shop)), shop
+    for shop in ["Worten", "makro.es", "Leroy Merlin España", "Amazon.es - Seller"]:
+        assert not stores.is_trusted(stores.classify(shop)), shop
+    monkeypatch.setenv("TRUSTED_SHOPS", "worten, fnac")       # cambiable en el .env
+    assert stores.classify("Worten") == stores.RETAILER
+    assert stores.classify("Carrefour") == stores.UNKNOWN
 
 
 def test_second_hand_detection():

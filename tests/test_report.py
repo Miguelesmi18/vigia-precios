@@ -85,3 +85,20 @@ def test_report_without_data():
 
 def test_report_nothing_watched():
     assert "no vigilas nada" in build_report(db.connect(":memory:"), now=NOW)
+
+
+def test_outlier_and_old_other_shop():
+    conn = db.connect(":memory:")
+    pid = db.add_physical(conn, "Cafetera", 28000, query="cafetera")
+    # Un día solo aparece un Fnac absurdo a 1.499 €: debe ignorarse
+    for day, shop, price in [(14, "delonghi.es", 27990), (16, "Fnac", 149900),
+                             (19, "delonghi.es", 29990)]:
+        db.save_price(conn, pid, shop, price, None, "EUR", None,
+                      checked_at=f"2026-11-{day}T09:00:00+00:00", trust="official")
+    # Una tienda desconocida más barata, pero vista el día 16 (no en la última comprobación)
+    db.save_price(conn, pid, "makro-falso.es", 25000, None, "EUR", None,
+                  checked_at="2026-11-16T09:00:00+00:00", trust="unknown")
+    text = build_report(conn, now=NOW, include_server=False)
+    assert "1499" not in text and "1.499" not in text
+    assert "▁█" in text                       # gráfica sin el pico absurdo
+    assert "🔎 makro-falso.es: 250,00 € (fuera de tu lista de confianza, visto el 16/11)" in text

@@ -1,31 +1,38 @@
 """Clasificación de tiendas por nivel de confianza.
 
-  official    -> tienda oficial de la marca (De'Longhi, Philips...)
-  retailer    -> gran tienda conocida en España (Amazon, MediaMarkt...)
-  marketplace -> plataforma de vendedores de terceros (eBay, AliExpress...)
-  unknown     -> cualquier otra: puede ser legal, pero no la conocemos
+  retailer    -> TUS tiendas de confianza (TRUSTED_SHOPS en el .env)
+  official    -> tienda oficial de la marca (De'Longhi, Razer...): también de confianza
+  marketplace -> vendedores de terceros (eBay, AliExpress, "Amazon.es - Seller"...)
+  unknown     -> cualquier otra tienda, aunque sea grande: no está en tu lista
 
-Puedes ampliar estas listas cuando quieras: es solo texto.
+Solo 'retailer' y 'official' generan avisos de compra 🔔; el resto, pistas 🔎.
 """
 
+import os
 import re
 
 OFFICIAL, RETAILER, MARKETPLACE, UNKNOWN = "official", "retailer", "marketplace", "unknown"
 
 LABELS = {
     OFFICIAL: "oficial de la marca",
-    RETAILER: "gran tienda",
+    RETAILER: "tienda de tu confianza",
     MARKETPLACE: "marketplace (vendedores de terceros)",
-    UNKNOWN: "tienda desconocida",
+    UNKNOWN: "fuera de tu lista de confianza",
 }
 
-# Se compara en minúsculas con el nombre de la tienda que da Google Shopping
-RETAILERS = [
-    "amazon", "mediamarkt", "media markt", "el corte inglés", "el corte ingles",
-    "pccomponentes", "fnac", "carrefour", "worten", "alcampo", "eroski", "hipercor",
-    "leroy merlin", "lidl", "decathlon", "conforama", "ikea", "coolmod", "electrocosto",
-    "tien21", "milar", "euronics", "apple", "game", "xtralife",
-]
+# Tus tiendas de confianza. Se cambian en el .env con TRUSTED_SHOPS
+# (separadas por comas), sin tocar el código.
+DEFAULT_TRUSTED = ["amazon", "mediamarkt", "media markt", "el corte inglés",
+                   "el corte ingles", "carrefour", "fnac", "pccomponentes"]
+
+
+def trusted_shops() -> list[str]:
+    value = os.getenv("TRUSTED_SHOPS", "").strip()
+    if not value:
+        return DEFAULT_TRUSTED
+    return [t.strip().lower() for t in value.split(",") if t.strip()]
+
+
 MARKETPLACES = [
     "ebay", "aliexpress", "alibaba", "temu", "miravia", "wallapop", "shein", "wish",
     "fruugo", "manomano", "rakuten", "cdiscount", "back market", "backmarket",
@@ -61,7 +68,7 @@ def classify(shop: str) -> str:
     # como tienda grande
     if _contains(name, MARKETPLACES) or _contains(name, THIRD_PARTY_WORDS):
         return MARKETPLACE
-    if _contains(name, RETAILERS):
+    if _contains(name, trusted_shops()):
         return RETAILER
     if _contains(name, BRANDS):
         return OFFICIAL

@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 
 import requests
 
-from vigia import analysis, config, db, report, stores
+from vigia import analysis, charts, config, db, report, stores
 from vigia.ggdeals import GgDealsClient
 from vigia.itad import STEAM_SHOP_ID, ItadClient
 from vigia.serpapi import SerpApiClient
@@ -161,6 +161,12 @@ def cmd_list(args, conn, clients):
 def cmd_report(args, conn, clients):
     """Resumen de los últimos días (lo usa la tarea semanal de Hermes)."""
     print(report.build_report(conn, days=args.days))
+    if args.chart:
+        path = charts.make_chart(conn, config.PROJECT_ROOT / "data" / "charts" / "resumen.png",
+                                 days=args.days)
+        if path:
+            # Hermes convierte esta línea en una imagen adjunta en Telegram
+            print(f"MEDIA:{path}")
     return 0
 
 
@@ -436,6 +442,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("report", help="Resumen de precios de los últimos días")
     p.add_argument("--days", type=int, default=7, help="Días a resumir (por defecto 7)")
+    p.add_argument("--chart", action="store_true",
+                   help="Añadir una gráfica PNG (línea MEDIA: para Telegram)")
     p.set_defaults(func=cmd_report, needs_api=False)
 
     p = sub.add_parser("remove", help="Dejar de vigilar")
