@@ -72,3 +72,11 @@ def test_one_day_of_history_is_not_a_historic_low():
     assert v.level == UNKNOWN
     assert "historial" in v.summary()
     assert "mínimo histórico" not in v.summary()
+
+
+def test_full_price_never_discounted_is_not_a_good_offer():
+    """Juego en reserva siempre a 69,99 €: es su precio normal, no una oferta."""
+    points = history((60, 6999), (20, 6999))
+    v = analyze(points, current_cents=6999, cut=0, now=NOW)
+    assert v.level == NORMAL
+    assert "nunca ha estado más barato" in v.summary()

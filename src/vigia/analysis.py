@@ -127,13 +127,17 @@ def analyze(points: list[PricePoint], current_cents: int, cut: int,
 
     # Regla 3: comparación con el mínimo histórico
     lowest = min([p.price_cents for p in points] + [current_cents])
-    if current_cents <= lowest:
+    # Sin descuento, estar en el "mínimo" solo significa que nunca ha bajado:
+    # es el precio normal, no una oferta (ej. un juego en reserva a 69,99 €)
+    if current_cents <= lowest and cut == 0:
+        reasons.append("precio de siempre: nunca ha estado más barato")
+    elif current_cents <= lowest:
         reasons.append("🎯 mínimo histórico")
         if level != FAKE:
             level = GOOD
     elif current_cents <= lowest * NEAR_LOW_MARGIN:
         reasons.append(f"cerca del mínimo histórico ({euros(lowest)})")
-        if level != FAKE:
+        if level != FAKE and cut > 0:
             level = GOOD
     elif current_cents > lowest * FAR_FROM_LOW_MARGIN:
         reasons.append(f"lejos del mínimo histórico ({euros(lowest)})")
