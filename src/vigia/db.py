@@ -38,6 +38,12 @@ CREATE TABLE IF NOT EXISTS prices (
 CREATE INDEX IF NOT EXISTS idx_prices_product_date
     ON prices (product_id, checked_at);
 
+-- Llamadas a APIs con límite (para contar las búsquedas de SerpApi del mes)
+CREATE TABLE IF NOT EXISTS api_calls (
+    service    TEXT NOT NULL,
+    called_at  TEXT NOT NULL
+);
+
 -- Avisos ya enviados, para no repetirlos (uno por producto y tipo de aviso)
 CREATE TABLE IF NOT EXISTS alerts (
     product_id   INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
@@ -183,3 +189,26 @@ def clear_alert(conn, product_id: int, kind: str) -> None:
     """El precio volvió a subir del objetivo: la próxima bajada será un aviso nuevo."""
     conn.execute("DELETE FROM alerts WHERE product_id = ? AND kind = ?", (product_id, kind))
     conn.commit()
+
+
+# ---------------------------------------------------------------- uso de APIs
+
+def log_api_call(conn, service: str) -> None:
+    conn.execute("INSERT INTO api_calls (service, called_at) VALUES (?, ?)",
+                 (service, now_iso()))
+    conn.commit()
+
+
+def count_api_calls(conn, service: str, since_iso: str) -> int:
+    row = conn.execute("SELECT COUNT(*) AS n FROM api_calls WHERE service = ? AND called_at >= ?",
+                       (service, since_iso)).fetchone()
+    return row["n"]
+
+
+def latest_prices(conn, product_id: int) -> list[sqlite3.Row]:
+    """Los precios de la última comprobación de un producto (uno por tienda)."""
+    return conn.execute(
+        "SELECT * FROM prices WHERE product_id = ? AND checked_at = "
+        "(SELECT MAX(checked_at) FROM prices WHERE product_id = ?) ORDER BY price_cents",
+        (product_id, product_id),
+    ).fetchall()

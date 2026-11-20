@@ -1,55 +1,86 @@
 """Tests del resumen semanal con un historial inventado."""
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from vigia import db
-from vigia.report import build_report, trend
+from vigia.report import black_friday, build_report, countdown, sparkline, trend_text
 
-NOW = datetime(2026, 11, 23, 9, 0, tzinfo=timezone.utc)
-
-
-def test_trend_text():
-    assert trend(2450, 2450) == "sin cambios"
-    assert trend(2450, 1999) == "↓ 4,51 € en la semana"
-    assert trend(1999, 2450) == "↑ 4,51 € en la semana"
+NOW = datetime(2026, 11, 20, 9, 0, tzinfo=timezone.utc)
 
 
-def test_report_games_and_physical():
+def test_small_pieces():
+    assert trend_text(2450, 2450) == "sin cambios"
+    assert trend_text(2450, 1999) == "↓ 4,51 €"
+    assert sparkline([100, 100, 100]) == "▄▄▄"
+    assert sparkline([100, 200]) == "▁█"
+    assert len(sparkline(list(range(30)))) == 8          # como mucho 8 puntos
+    assert black_friday(2026) == date(2026, 11, 27)
+    assert countdown(date(2026, 11, 20)) == "🖤 Black Friday en 7 días"
+    assert countdown(date(2026, 12, 1)) == "🎄 Navidad en 24 días"
+
+
+def make_db():
     conn = db.connect(":memory:")
-    hades = db.add_product(conn, "Hades", 1500, itad_id="id-1", steam_appid=1145360)
+    p4 = db.add_product(conn, "Persona 4 Revival", 4000, itad_id="id-1", steam_appid=1)
     caf = db.add_physical(conn, "Cafetera", 28000, query="cafetera")
+    razer = db.add_physical(conn, "Razer", 8500, query="razer")
+    for day, steam, keys in [(14, 6999, 4064), (19, 6999, 4064)]:
+        ts = f"2026-11-{day}T09:00:00+00:00"
+        db.save_price(conn, p4, "Steam", steam, steam, "EUR", None, checked_at=ts)
+        db.save_price(conn, p4, "Claves", keys, None, "EUR", None, checked_at=ts, trust="keyshop")
+    for day, price in [(14, 27990), (19, 29990)]:
+        db.save_price(conn, caf, "delonghi.es", price, None, "EUR", None,
+                      checked_at=f"2026-11-{day}T09:00:00+00:00", trust="official")
+    ts = "2026-11-19T09:00:00+00:00"
+    db.save_price(conn, razer, "Razer.com", 8999, None, "EUR", None, checked_at=ts,
+                  trust="official")
+    db.save_price(conn, razer, "Play-Asia.com", 7735, None, "EUR", None, checked_at=ts,
+                  trust="unknown")
+    return conn
 
-    # Hades: Steam fijo; claves bajan de 15,80 a 10,08
-    db.save_price(conn, hades, "Steam", 2450, 2450, "EUR", None,
-                  checked_at="2026-11-17T09:00:00+00:00")
-    db.save_price(conn, hades, "Steam", 2450, 2450, "EUR", None,
-                  checked_at="2026-11-22T09:00:00+00:00")
-    db.save_price(conn, hades, "Claves", 1580, None, "EUR", None,
-                  checked_at="2026-11-17T09:00:00+00:00", trust="keyshop")
-    db.save_price(conn, hades, "Claves", 1008, None, "EUR", None,
-                  checked_at="2026-11-22T09:00:00+00:00", trust="keyshop")
-    # Cafetera: MediaMarkt baja de 299,90 a 279,90 (por debajo del objetivo)
-    db.save_price(conn, caf, "MediaMarkt", 29990, None, "EUR", None,
-                  checked_at="2026-11-18T09:00:00+00:00", trust="retailer")
-    db.save_price(conn, caf, "MediaMarkt", 27990, None, "EUR", None,
-                  checked_at="2026-11-22T09:00:00+00:00", trust="retailer")
-    # Un precio de hace un mes no debe contar
-    db.save_price(conn, caf, "MediaMarkt", 19990, None, "EUR", None,
-                  checked_at="2026-10-20T09:00:00+00:00", trust="retailer")
 
-    text = build_report(conn, days=7, now=NOW)
-    assert "🎮 Hades — objetivo 15,00 €" in text
-    assert "Steam: 24,50 € (sin cambios)" in text
-    assert "Claves: 10,08 € (↓ 5,72 € en la semana) · mínimo de la semana 10,08 €" in text
-    assert "Tiendas de confianza: 279,90 € (↓ 20,00 € en la semana)" in text
-    assert "199,90" not in text                       # fuera de la semana
-    assert "✅ Ahora mismo está por debajo de tu objetivo" in text
+def test_report_layout_and_order():
+    text = build_report(make_db(), now=NOW, include_server=False)
+    assert "🖤 Black Friday en 7 días" in text
+    # Orden por cercanía al objetivo: Persona (40,64/40) antes que Razer y Cafetera
+    assert text.index("Persona 4 Revival") < text.index("Razer") < text.index("Cafetera")
+    assert "🟡 Persona 4 Revival — objetivo 40,00 €" in text
+    assert "🔑 Claves: 40,64 € · faltan 0,64 €" in text
+    assert "🟡 Razer" in text                     # 89,99 sobre 85: menos del 10 %
+    assert "🟡 Cafetera" in text                  # 299,90 sobre 280: un 7 % por encima
+    assert "🏬 delonghi.es: 299,90 € · faltan 19,90 €" in text
+    assert "(mínimo de la semana: 279,90 €)" in text
+    assert "⏳ Mejor esperar: ha subido esta semana" in text
+    assert "🔎 Play-Asia.com: 77,35 €" in text and "extranjera" in text
+    assert "⏳ Espera al Black Friday" in text
+
+
+def test_report_budget_and_serpapi(monkeypatch):
+    monkeypatch.setenv("CHRISTMAS_BUDGET", "400")
+    conn = make_db()
+    db.log_api_call(conn, "serpapi")
+    text = build_report(conn, now=datetime.now(timezone.utc), include_server=False)
+    # Todo hoy: 40,64 (claves) + 299,90 + 89,99 = 430,53
+    assert "🎁 Comprarlo todo hoy: 430,53 € · a tus precios: 405,00 €" in text
+    assert "Presupuesto 400,00 €: te pasas 30,53 €" in text
+    assert "🔍 SerpApi: 1/250 búsquedas este mes" in text
+
+
+def test_product_at_target_says_buy():
+    conn = db.connect(":memory:")
+    pid = db.add_physical(conn, "Mando", 6000, query="mando")
+    db.save_price(conn, pid, "PcComponentes", 5499, None, "EUR", None,
+                  checked_at="2026-11-19T09:00:00+00:00", trust="retailer")
+    text = build_report(conn, now=NOW, include_server=False)
+    assert "✅ Mando" in text
+    assert "✔ a tu precio" in text
+    assert "👉 Buen momento: está a tu precio" in text
 
 
 def test_report_without_data():
     conn = db.connect(":memory:")
     db.add_physical(conn, "Auriculares", 8500, query="auriculares")
-    assert "Sin datos esta semana" in build_report(conn, now=NOW)
+    assert "Sin datos esta semana" in build_report(conn, now=NOW, include_server=False)
 
 
 def test_report_nothing_watched():

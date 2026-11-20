@@ -48,3 +48,16 @@ def get_serpapi_key() -> str | None:
 # Horas mínimas entre dos consultas del mismo producto físico (ahorra búsquedas:
 # el plan gratuito de SerpApi da 250 al mes)
 PHYSICAL_INTERVAL_HOURS = float(os.getenv("PHYSICAL_INTERVAL_HOURS", "20"))
+
+
+# Opcional: presupuesto total de Navidad en euros (ej. CHRISTMAS_BUDGET=450)
+def christmas_budget_cents() -> int | None:
+    value = os.getenv("CHRISTMAS_BUDGET", "").strip().replace(",", ".")
+    try:
+        return round(float(value) * 100) if value else None
+    except ValueError:
+        return None
+
+
+# Búsquedas al mes del plan de SerpApi (el gratuito tiene 250)
+SERPAPI_MONTHLY_LIMIT = int(os.getenv("SERPAPI_MONTHLY_LIMIT", "250"))

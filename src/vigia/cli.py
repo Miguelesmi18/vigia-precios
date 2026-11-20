@@ -118,6 +118,7 @@ def cmd_shop(args, conn, clients):
     """Explorar: busca en Google Shopping y muestra precio final y confianza. Gasta 1 búsqueda."""
     offers = require_serp(clients).shopping(args.query, country=config.COUNTRY,
                                             model=args.model)
+    db.log_api_call(conn, "serpapi")
     if not offers:
         print("Sin resultados nuevos (se descartan usados y reacondicionados).")
         return 1
@@ -315,6 +316,7 @@ def check_physical(args, conn, clients, products):
 
         target = p["target_cents"]
         offers = clients.serp.shopping(p["query"], country=config.COUNTRY, model=p["model"])
+        db.log_api_call(conn, "serpapi")
         checked_at = db.now_iso()
 
         # Guardar la oferta más barata de cada tienda
