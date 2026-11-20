@@ -55,6 +55,26 @@ def parse_euros(text: str) -> int:
     return round(value * 100)
 
 
+def should_alert(args, conn, product_id: int, kind: str, price_cents: int) -> bool:
+    """Con --only-new solo se avisa si es la primera vez o si el precio ha bajado más.
+
+    Así un producto que sigue barato no te escribe dos veces al día.
+    """
+    if not getattr(args, "only_new", False):
+        return True
+    last = db.last_alert_price(conn, product_id, kind)
+    if last is not None and price_cents >= last:
+        return False
+    db.save_alert(conn, product_id, kind, price_cents)
+    return True
+
+
+def reset_alert(args, conn, product_id: int, kind: str) -> None:
+    """El precio ya no está por debajo del objetivo: se olvida el aviso anterior."""
+    if getattr(args, "only_new", False):
+        db.clear_alert(conn, product_id, kind)
+
+
 def require_serp(clients):
     if not clients.serp:
         raise RuntimeError("Falta SERPAPI_KEY en el .env (necesaria para productos físicos).")
@@ -221,21 +241,27 @@ def check_games(args, conn, clients, games):
 
         # Avisos (los que van a Telegram)
         if steam_best and steam_best.price_cents <= target:
-            print(f"🔔 {p['name']}: {euros(steam_best.price_cents)} en Steam "
-                  f"(-{steam_best.cut}%, objetivo {euros(target)})")
-            print(f"   {steam_verdict.summary()}")
-            if steam_best.url:
-                print(f"   {steam_best.url}")
+            if should_alert(args, conn, p["id"], "steam", steam_best.price_cents):
+                print(f"🔔 {p['name']}: {euros(steam_best.price_cents)} en Steam "
+                      f"(-{steam_best.cut}%, objetivo {euros(target)})")
+                print(f"   {steam_verdict.summary()}")
+                if steam_best.url:
+                    print(f"   {steam_best.url}")
+        else:
+            reset_alert(args, conn, p["id"], "steam")
         if (ks and ks.keyshop_cents is not None and ks.keyshop_cents <= target
                 and config.keyshop_alerts_enabled()):
             # Es una PISTA, no una compra segura: GG.deals no dice qué tienda es
             # ni si es clave, regalo o cuenta.
-            print(f"🔎 {p['name']}: posible chollo en tiendas de claves, "
-                  f"{euros(ks.keyshop_cents)} (objetivo {euros(target)})")
-            print(f"   {ks_verdict.summary()}")
-            print(f"   {KEYSHOP_CHECKLIST}")
-            if ks.url:
-                print(f"   {ks.url}")
+            if should_alert(args, conn, p["id"], "keyshop", ks.keyshop_cents):
+                print(f"🔎 {p['name']}: posible chollo en tiendas de claves, "
+                      f"{euros(ks.keyshop_cents)} (objetivo {euros(target)})")
+                print(f"   {ks_verdict.summary()}")
+                print(f"   {KEYSHOP_CHECKLIST}")
+                if ks.url:
+                    print(f"   {ks.url}")
+        else:
+            reset_alert(args, conn, p["id"], "keyshop")
 
         # Resumen completo (solo sin --quiet)
         if not args.quiet:
@@ -312,18 +338,25 @@ def check_physical(args, conn, clients, products):
 
         # Avisos
         if best_trusted and best_trusted.total_cents <= target:
-            print(f"🔔 {p['name']}: {euros(best_trusted.total_cents)} en {best_trusted.shop} "
-                  f"({shipping_text(best_trusted.shipping_cents)}, objetivo {euros(target)})")
-            print(f"   {verdict.summary()}")
-            if best_trusted.link:
-                print(f"   {best_trusted.link}")
+            if should_alert(args, conn, p["id"], "trusted", best_trusted.total_cents):
+                print(f"🔔 {p['name']}: {euros(best_trusted.total_cents)} en {best_trusted.shop} "
+                      f"({shipping_text(best_trusted.shipping_cents)}, objetivo {euros(target)})")
+                print(f"   {verdict.summary()}")
+                if best_trusted.link:
+                    print(f"   {best_trusted.link}")
+        else:
+            reset_alert(args, conn, p["id"], "trusted")
         if (best_other and best_other.total_cents <= target
                 and (not best_trusted or best_other.total_cents < best_trusted.total_cents)):
-            print(f"🔎 {p['name']}: {euros(best_other.total_cents)} en {best_other.shop} "
-                  f"[{stores.describe(best_other.shop, best_other.trust)}] (objetivo {euros(target)})")
-            print(f"   {MARKETPLACE_CHECKLIST}")
-            if best_other.link:
-                print(f"   {best_other.link}")
+            if should_alert(args, conn, p["id"], "other", best_other.total_cents):
+                print(f"🔎 {p['name']}: {euros(best_other.total_cents)} en {best_other.shop} "
+                      f"[{stores.describe(best_other.shop, best_other.trust)}] "
+                      f"(objetivo {euros(target)})")
+                print(f"   {MARKETPLACE_CHECKLIST}")
+                if best_other.link:
+                    print(f"   {best_other.link}")
+        else:
+            reset_alert(args, conn, p["id"], "other")
 
         # Resumen
         if not args.quiet:
@@ -402,6 +435,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Solo imprime los avisos (para tareas automáticas)")
     p.add_argument("--force", action="store_true",
                    help="Consultar productos físicos aunque se hayan mirado hace poco")
+    p.add_argument("--only-new", action="store_true",
+                   help="Avisar solo de ofertas nuevas o más baratas que el último aviso")
     p.set_defaults(func=cmd_check, needs_api=True)
     return parser
 

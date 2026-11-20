@@ -215,3 +215,60 @@ def test_suspicious_offer_never_alerts(capsys):
     cli.cmd_check(Args(quiet=True, force=False), conn,
                   cli.Clients(serp=FakeSerp(offers + [scam])))
     assert capsys.readouterr().out == ""      # ni 🔔 ni 🔎 por la oferta sospechosa
+
+
+# ---------------------------------------------------------------- solo avisos nuevos
+
+def test_only_new_does_not_repeat_same_offer(capsys):
+    conn = db.connect(":memory:")
+    db.add_product(conn, "Hades", 3000, itad_id="id-1", steam_appid=1145360)
+    clients = cli.Clients(itad=FakeItad(2450), gg=None)
+    args = Args(quiet=True, force=False, only_new=True)
+
+    cli.cmd_check(args, conn, clients)
+    assert "🔔 Hades: 24,50 € en Steam" in capsys.readouterr().out   # primera vez: aviso
+
+    cli.cmd_check(args, conn, clients)
+    assert capsys.readouterr().out == ""                            # mismo precio: silencio
+
+
+def test_only_new_alerts_again_if_cheaper(capsys):
+    conn = db.connect(":memory:")
+    db.add_product(conn, "Hades", 3000, itad_id="id-1", steam_appid=1145360)
+    args = Args(quiet=True, force=False, only_new=True)
+    cli.cmd_check(args, conn, cli.Clients(itad=FakeItad(2450)))
+    capsys.readouterr()
+    cli.cmd_check(args, conn, cli.Clients(itad=FakeItad(1999)))       # baja más
+    assert "19,99 € en Steam" in capsys.readouterr().out
+
+
+def test_only_new_resets_when_price_goes_back_up(capsys):
+    conn = db.connect(":memory:")
+    db.add_product(conn, "Hades", 3000, itad_id="id-1", steam_appid=1145360)
+    args = Args(quiet=True, force=False, only_new=True)
+    cli.cmd_check(args, conn, cli.Clients(itad=FakeItad(2450)))       # aviso
+    cli.cmd_check(args, conn, cli.Clients(itad=FakeItad(3500)))       # sube: se olvida
+    capsys.readouterr()
+    cli.cmd_check(args, conn, cli.Clients(itad=FakeItad(2450)))       # vuelve a bajar
+    assert "24,50 € en Steam" in capsys.readouterr().out             # aviso nuevo
+
+
+def test_without_only_new_always_shows(capsys):
+    conn = db.connect(":memory:")
+    db.add_product(conn, "Hades", 3000, itad_id="id-1", steam_appid=1145360)
+    args = Args(quiet=True, force=False)                               # comprobación manual
+    clients = cli.Clients(itad=FakeItad(2450))
+    cli.cmd_check(args, conn, clients)
+    cli.cmd_check(args, conn, clients)
+    assert capsys.readouterr().out.count("24,50 € en Steam") == 2
+
+
+def test_only_new_physical(capsys):
+    conn = db.connect(":memory:")
+    db.add_physical(conn, "Cafetera", 26000, query="cafetera")
+    serp = FakeSerp(cafetera_offers(mediamarkt=25900, ebay=30000))
+    args = Args(quiet=True, force=True, only_new=True)
+    cli.cmd_check(args, conn, cli.Clients(serp=serp))
+    assert "🔔 Cafetera" in capsys.readouterr().out
+    cli.cmd_check(args, conn, cli.Clients(serp=serp))
+    assert capsys.readouterr().out == ""

@@ -57,3 +57,14 @@ def test_old_database_is_migrated(tmp_path):
     assert product["name"] == "Hades"            # no se ha perdido nada
     assert product["steam_appid"] is None        # columna nueva, vacía
     assert db.price_history(conn, 1)[0]["trust"] == "official"
+
+
+def test_alerts_save_update_clear():
+    conn = db.connect(":memory:")
+    pid = db.add_product(conn, "Hades", 1500, itad_id="abc")
+    assert db.last_alert_price(conn, pid, "steam") is None
+    db.save_alert(conn, pid, "steam", 1249)
+    db.save_alert(conn, pid, "steam", 999)              # se actualiza, no se duplica
+    assert db.last_alert_price(conn, pid, "steam") == 999
+    db.clear_alert(conn, pid, "steam")
+    assert db.last_alert_price(conn, pid, "steam") is None

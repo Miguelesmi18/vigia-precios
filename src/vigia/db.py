@@ -37,6 +37,15 @@ CREATE TABLE IF NOT EXISTS prices (
 
 CREATE INDEX IF NOT EXISTS idx_prices_product_date
     ON prices (product_id, checked_at);
+
+-- Avisos ya enviados, para no repetirlos (uno por producto y tipo de aviso)
+CREATE TABLE IF NOT EXISTS alerts (
+    product_id   INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    kind         TEXT    NOT NULL,     -- 'steam', 'keyshop', 'trusted', 'other'
+    price_cents  INTEGER NOT NULL,     -- precio del último aviso enviado
+    sent_at      TEXT    NOT NULL,
+    PRIMARY KEY (product_id, kind)
+);
 """
 
 # Columnas añadidas después de la versión 0.1.0. Si tu base de datos es
@@ -150,3 +159,27 @@ def best_price_per_check(conn, product_id: int, trusts: tuple[str, ...]) -> list
         f"GROUP BY checked_at ORDER BY checked_at",
         (product_id, *trusts),
     ).fetchall()
+
+
+# ---------------------------------------------------------------- avisos enviados
+
+def last_alert_price(conn, product_id: int, kind: str) -> int | None:
+    row = conn.execute("SELECT price_cents FROM alerts WHERE product_id = ? AND kind = ?",
+                       (product_id, kind)).fetchone()
+    return row["price_cents"] if row else None
+
+
+def save_alert(conn, product_id: int, kind: str, price_cents: int) -> None:
+    conn.execute(
+        "INSERT INTO alerts (product_id, kind, price_cents, sent_at) VALUES (?, ?, ?, ?) "
+        "ON CONFLICT (product_id, kind) DO UPDATE SET price_cents = excluded.price_cents, "
+        "sent_at = excluded.sent_at",
+        (product_id, kind, price_cents, now_iso()),
+    )
+    conn.commit()
+
+
+def clear_alert(conn, product_id: int, kind: str) -> None:
+    """El precio volvió a subir del objetivo: la próxima bajada será un aviso nuevo."""
+    conn.execute("DELETE FROM alerts WHERE product_id = ? AND kind = ?", (product_id, kind))
+    conn.commit()
