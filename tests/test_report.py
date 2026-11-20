@@ -27,7 +27,8 @@ def make_db():
     for day, steam, keys in [(14, 6999, 4064), (19, 6999, 4064)]:
         ts = f"2026-11-{day}T09:00:00+00:00"
         db.save_price(conn, p4, "Steam", steam, steam, "EUR", None, checked_at=ts)
-        db.save_price(conn, p4, "Claves", keys, None, "EUR", None, checked_at=ts, trust="keyshop")
+        db.save_price(conn, p4, "Claves", keys, None, "EUR", "https://gg.deals/game/persona-4-revival/",
+                      checked_at=ts, trust="keyshop")
     for day, price in [(14, 27990), (19, 29990)]:
         db.save_price(conn, caf, "delonghi.es", price, None, "EUR", None,
                       checked_at=f"2026-11-{day}T09:00:00+00:00", trust="official")
@@ -46,6 +47,7 @@ def test_report_layout_and_order():
     assert text.index("Persona 4 Revival") < text.index("Razer") < text.index("Cafetera")
     assert "🟡 Persona 4 Revival — objetivo 40,00 €" in text
     assert "🔑 Claves: 40,64 € · faltan 0,64 €" in text
+    assert "🔗 Ver en qué tienda está: https://gg.deals/game/persona-4-revival/" in text
     assert "🟡 Razer" in text                     # 89,99 sobre 85: menos del 10 %
     assert "🟡 Cafetera" in text                  # 299,90 sobre 280: un 7 % por encima
     assert "🏬 delonghi.es: 299,90 € · faltan 19,90 €" in text

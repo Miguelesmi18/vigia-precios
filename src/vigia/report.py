@@ -94,6 +94,7 @@ class Series:
     prices: list[int]
     seen_on: str | None = None    # fecha del último precio si NO es de la última comprobación
     trust: str = ""               # confianza de la tienda del último precio
+    url: str | None = None        # enlace del último precio (en claves: página de GG.deals)
 
     @property
     def last(self) -> int:
@@ -149,7 +150,8 @@ def _series(conn, product_id: int, trusts: tuple[str, ...], since: str,
     if last["checked_at"] != db.last_checked(conn, product_id):
         seen_on = datetime.fromisoformat(last["checked_at"]).astimezone().strftime("%d/%m")
     return Series(label, icon, shop, [r["price_cents"] for r in rows], seen_on,
-                  shop_row["trust"] if shop_row else "")
+                  shop_row["trust"] if shop_row else "",
+                  shop_row["url"] if shop_row else None)
 
 
 def summarize_product(conn, p, since: str) -> ProductSummary:
@@ -205,6 +207,9 @@ def render_product(s: ProductSummary, days_to_bf: int | None) -> list[str]:
                      f"{'  ' + spark if spark else ''} · {trend_text(series.prices[0], series.last)}")
         if series.lowest < series.last:
             lines.append(f"      (mínimo de la semana: {euros(series.lowest)})")
+        if series.label == "Claves" and series.url:
+            # GG.deals no dice qué tienda es: en su página salen ordenadas por precio
+            lines.append(f"      🔗 Ver en qué tienda está: {series.url}")
     if s.extra:
         seen = f", visto el {s.extra.seen_on}" if s.extra.seen_on else ""
         trust = f" ({s.extra_trust}{seen})" if s.extra_trust or seen else ""
