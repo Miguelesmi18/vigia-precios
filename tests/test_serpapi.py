@@ -58,3 +58,11 @@ def test_flag_suspicious_too_cheap():
               Offer("x", "Suditel", "unknown", 35900, None, None)]
     flag_suspicious(offers)
     assert [o.suspicious for o in offers] == [True, False, False, False]
+
+
+def test_safe_url_encodes_spaces():
+    from vigia.serpapi import safe_url
+    url = "https://www.google.com/search?q=Razer Hammerhead V3&udm=28"
+    assert safe_url(url) == "https://www.google.com/search?q=Razer%20Hammerhead%20V3&udm=28"
+    assert safe_url(safe_url(url)) == safe_url(url)      # no codifica dos veces
+    assert safe_url(None) is None

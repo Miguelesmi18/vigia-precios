@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from statistics import median
 
 import requests
+from requests.utils import requote_uri
 
 from vigia import stores
 from vigia.itad import to_cents
@@ -121,7 +122,12 @@ class SerpApiClient:
                 trust=stores.classify(shop),
                 price_cents=to_cents(price),
                 shipping_cents=find_shipping(item),
-                link=item.get("product_link") or item.get("link"),
+                link=safe_url(item.get("product_link") or item.get("link")),
             ))
         flag_suspicious(offers)
         return sorted(offers, key=lambda o: o.total_cents)
+
+
+def safe_url(url: str | None) -> str | None:
+    """Codifica espacios y símbolos raros: Telegram corta un enlace en el primer espacio."""
+    return requote_uri(url) if url else url

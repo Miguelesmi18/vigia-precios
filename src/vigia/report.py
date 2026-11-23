@@ -8,6 +8,7 @@ from pathlib import Path
 from statistics import median
 
 from vigia import config, db, stores
+from vigia.serpapi import safe_url
 
 SPARK_CHARS = "▁▂▃▄▅▆▇█"
 NEAR_TARGET = 0.10           # a menos de un 10 % del objetivo = 🟡
@@ -62,6 +63,20 @@ def countdown(today: date) -> str | None:
     return None
 
 
+def battery_status(root: Path = Path("/sys/class/power_supply")) -> str | None:
+    """Batería del portátil: '🔋 100 % enchufado' o '🪫 40 % sin cargador'."""
+    for bat in sorted(root.glob("BAT*")):
+        try:
+            level = int((bat / "capacity").read_text().strip())
+            state = (bat / "status").read_text().strip()
+        except (OSError, ValueError):
+            continue
+        if state == "Discharging":
+            return f"{'🪫' if level < 30 else '🔋'} {level} % sin cargador"
+        return f"🔌 {level} % enchufado"
+    return None
+
+
 def server_status() -> str | None:
     """Temperatura y tiempo encendido (solo en Linux; en Windows no se muestra)."""
     parts = []
@@ -73,6 +88,9 @@ def server_status() -> str | None:
             pass
     if temps:
         parts.append(f"{max(temps)} °C")
+    battery = battery_status()
+    if battery:
+        parts.append(battery)
     try:
         seconds = float(Path("/proc/uptime").read_text().split()[0])
         days = int(seconds // 86400)
@@ -209,16 +227,16 @@ def render_product(s: ProductSummary, days_to_bf: int | None) -> list[str]:
             lines.append(f"      (mínimo de la semana: {euros(series.lowest)})")
         if series.label == "Claves" and series.url:
             # GG.deals no dice qué tienda es: en su página salen ordenadas por precio
-            lines.append(f"      🔗 Ver en qué tienda está: {series.url}")
+            lines.append(f"      🔗 Ver en qué tienda está: {safe_url(series.url)}")
         elif s.kind == "physical" and series.url:
             # Ficha de Google Shopping con la oferta de esa tienda y su botón
-            lines.append(f"      🔗 Ver la oferta: {series.url}")
+            lines.append(f"      🔗 Ver la oferta: {safe_url(series.url)}")
     if s.extra:
         seen = f", visto el {s.extra.seen_on}" if s.extra.seen_on else ""
         trust = f" ({s.extra_trust}{seen})" if s.extra_trust or seen else ""
         lines.append(f"   🔎 {s.extra.shop}: {euros(s.extra.last)}{trust} · solo como pista")
         if s.extra.url:
-            lines.append(f"      🔗 {s.extra.url}")
+            lines.append(f"      🔗 {safe_url(s.extra.url)}")
     lines.append(f"   {advice(s, days_to_bf)}")
     return lines
 

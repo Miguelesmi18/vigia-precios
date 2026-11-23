@@ -187,11 +187,22 @@ def cmd_check(args, conn, clients):
         return 0
     games = [p for p in products if p["kind"] == "game" and p["itad_id"]]
     physical = [p for p in products if p["kind"] == "physical"]
-    if games:
-        check_games(args, conn, clients, games)
-    if physical:
-        check_physical(args, conn, clients, physical)
-    return 0
+    # Cada parte va por separado: si una API falla, la otra se comprueba igualmente
+    errors = []
+    for items, check in ((games, check_games), (physical, check_physical)):
+        if not items:
+            continue
+        try:
+            check(args, conn, clients, items)
+        except requests.RequestException as e:
+            errors.append(describe_http_error(e, _secrets()))
+    for msg in errors:
+        print(f"⚠️ {msg}")
+    return 3 if errors else 0
+
+
+def _secrets() -> list[str]:
+    return [k for k in (config.get_ggdeals_key(), config.get_serpapi_key()) if k]
 
 
 def _fill_missing_appids(conn, clients, games):
@@ -481,8 +492,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Error: {e}")
         return 2
     except requests.RequestException as e:
-        secrets = [k for k in (config.get_ggdeals_key(), config.get_serpapi_key()) if k]
-        print(describe_http_error(e, secrets))
+        print(describe_http_error(e, _secrets()))
         return 3
     finally:
         conn.close()

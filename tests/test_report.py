@@ -115,3 +115,16 @@ def test_physical_products_include_offer_link():
     text = build_report(conn, now=NOW, include_server=False)
     assert "🏬 PcComponentes: 54,99 €" in text
     assert "🔗 Ver la oferta: https://www.google.com/shopping/product/123" in text
+
+
+def test_battery_status(tmp_path):
+    from vigia.report import battery_status
+    bat = tmp_path / "BAT0"
+    bat.mkdir()
+    (bat / "capacity").write_text("100\n")
+    (bat / "status").write_text("Full\n")
+    assert battery_status(tmp_path) == "🔌 100 % enchufado"
+    (bat / "capacity").write_text("25\n")
+    (bat / "status").write_text("Discharging\n")
+    assert battery_status(tmp_path) == "🪫 25 % sin cargador"
+    assert battery_status(tmp_path / "nada") is None

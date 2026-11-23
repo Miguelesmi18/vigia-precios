@@ -272,3 +272,27 @@ def test_only_new_physical(capsys):
     assert "🔔 Cafetera" in capsys.readouterr().out
     cli.cmd_check(args, conn, cli.Clients(serp=serp))
     assert capsys.readouterr().out == ""
+
+
+class BrokenSerp:
+    """SerpApi con la clave mal: responde 401."""
+
+    def shopping(self, *a, **kw):
+        import requests
+        from types import SimpleNamespace
+        resp = SimpleNamespace(status_code=401, text='{"error": "Invalid API key."}',
+                               url="https://serpapi.com/search.json?api_key=SECRETO")
+        raise requests.HTTPError(response=resp)
+
+
+def test_serpapi_error_does_not_stop_games(capsys):
+    conn = db.connect(":memory:")
+    cli.cmd_add(Args(title="Hades", target=2500), conn, cli.Clients(itad=FakeItad()))
+    db.add_physical(conn, "Cafetera", 25000, query="cafetera")
+    capsys.readouterr()
+    code = cli.cmd_check(Args(quiet=True, force=False), conn,
+                         cli.Clients(itad=FakeItad(steam_cents=1999), serp=BrokenSerp()))
+    out = capsys.readouterr().out
+    assert code == 3
+    assert "🔔" in out                       # el juego sí se ha comprobado
+    assert "⚠️ Error de SerpApi (401)" in out
