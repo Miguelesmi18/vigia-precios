@@ -5,6 +5,7 @@ Plan gratuito: 250 búsquedas al mes. Cada llamada a shopping() gasta UNA.
 """
 
 import re
+import time
 from dataclasses import dataclass
 from statistics import median
 
@@ -15,7 +16,8 @@ from vigia import stores
 from vigia.itad import to_cents
 
 BASE_URL = "https://serpapi.com/search.json"
-TIMEOUT = 30
+TIMEOUT = 60        # Google Shopping a veces tarda (sobre todo en Black Friday)
+RETRY_WAIT = 5      # segundos antes del único reintento
 # Una oferta por debajo de la mitad del precio mediano es sospechosa
 # (precio "demasiado bueno para ser verdad": posible estafa o producto distinto)
 SUSPICIOUS_RATIO = 0.5
@@ -79,25 +81,54 @@ def matches_model(title: str, model: str | None) -> bool:
     """Si se da un modelo (ej. 'ECAM22.110'), el título tiene que contenerlo.
 
     Se ignoran mayúsculas, espacios, puntos y guiones: 'ECAM 22-110' también vale.
+    Pero el modelo no puede seguir pegado a otra letra o número:
+    'Ultimate 2' NO vale para 'Ultimate 2C', que es otro mando.
     """
     if not model:
         return True
-    clean = lambda s: re.sub(r"[\s.\-_/]", "", s.lower())
-    return clean(model) in clean(title)
+    chars = re.sub(r"[\s.\-_/]", "", model.lower())
+    pattern = r"[\s.\-_/]*".join(re.escape(c) for c in chars)
+    return re.search(rf"(?<![a-z0-9]){pattern}(?![a-z0-9])", title.lower()) is not None
+
+
+# Palabras de accesorios: si salen en el título (y no en lo que buscas), no es el producto
+ACCESSORY_WORDS = ("funda", "estuche", "carcasa", "protector", "adaptador", "cable",
+                   "soporte", "skin", "pegatina", "repuesto", "recambio", "filtro",
+                   "case", "cover", "stand", "almohadilla", "grips")
+
+
+def looks_like_accessory(title: str, query: str = "") -> bool:
+    words = set(re.findall(r"[a-záéíóúñü]+", title.lower()))
+    wanted = set(re.findall(r"[a-záéíóúñü]+", query.lower()))
+    return any(w in words and w not in wanted for w in ACCESSORY_WORDS)
 
 
 class SerpApiClient:
     def __init__(self, api_key: str, session: requests.Session | None = None):
         self.api_key = api_key
         self.session = session or requests.Session()
-        self.session.headers["User-Agent"] = "vigia-precios/0.3 (proyecto personal)"
+        self._sleep = time.sleep
+        self.session.headers["User-Agent"] = "vigia-precios/0.5 (proyecto personal)"
+
+    def _get(self, params):
+        """Una petición con UN reintento si SerpApi tarda demasiado o falla (5xx)."""
+        for attempt in (1, 2):
+            try:
+                resp = self.session.get(BASE_URL, params=params, timeout=TIMEOUT)
+            except requests.Timeout:
+                if attempt == 2:
+                    raise
+            else:
+                if resp.status_code < 500 or attempt == 2:
+                    return resp
+            self._sleep(RETRY_WAIT)
 
     def shopping(self, query: str, country: str = "es", language: str = "es",
                  model: str | None = None) -> list[Offer]:
         """Busca en Google Shopping. Devuelve ofertas NUEVAS, de la más barata a la más cara."""
         params = {"engine": "google_shopping", "q": query, "gl": country.lower(),
                   "hl": language, "api_key": self.api_key}
-        resp = self.session.get(BASE_URL, params=params, timeout=TIMEOUT)
+        resp = self._get(params)
         if resp.status_code == 429:
             raise RuntimeError("SerpApi: límite de búsquedas alcanzado.")
         resp.raise_for_status()
@@ -110,6 +141,8 @@ class SerpApiClient:
             title = item.get("title", "")
             price = item.get("extracted_price")
             if price is None or not matches_model(title, model):
+                continue
+            if looks_like_accessory(title, query):
                 continue
             extras = " ".join(str(e) for e in item.get("extensions", []) or [])
             if stores.looks_second_hand(title, item.get("snippet"), extras,

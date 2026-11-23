@@ -66,3 +66,45 @@ def test_safe_url_encodes_spaces():
     assert safe_url(url) == "https://www.google.com/search?q=Razer%20Hammerhead%20V3&udm=28"
     assert safe_url(safe_url(url)) == safe_url(url)      # no codifica dos veces
     assert safe_url(None) is None
+
+
+def test_model_must_not_continue_with_letter():
+    assert matches_model("8BitDo Ultimate 2 Wireless Controller", "Ultimate 2")
+    assert not matches_model("Mando 8BitDo Ultimate 2C Switch", "Ultimate 2")
+    assert not matches_model("8BitDo Ultimate 2C", "Ultimate 2")
+
+
+def test_accessories_are_detected():
+    from vigia.serpapi import looks_like_accessory
+    assert looks_like_accessory("Funda de silicona para 8Bitdo Ultimate 2")
+    assert looks_like_accessory("Aenllosi Estuche Rígido para 8Bitdo Ultimate 2")
+    assert looks_like_accessory("Adaptador 8BitDo USB Wireless Adapter 2")
+    assert not looks_like_accessory("Mando 8BitDo Ultimate 2 Wireless")
+    # si lo que buscas ES el accesorio, no se descarta
+    assert not looks_like_accessory("Adaptador 8BitDo USB", query="adaptador 8bitdo")
+
+
+class FlakySession:
+    """Primero falla con 503 y después responde bien."""
+
+    def __init__(self, data):
+        from fakes import FakeResponse
+        self.responses = [FakeResponse({}, status_code=503), FakeResponse(data)]
+        self.headers = {}
+        self.calls = 0
+
+    def get(self, url, **kwargs):
+        self.calls += 1
+        return self.responses.pop(0)
+
+
+def test_shopping_retries_once_after_server_error():
+    session = FlakySession({"shopping_results": [
+        {"title": "Mando 8BitDo Ultimate 2", "source": "PcComponentes", "extracted_price": 54.99},
+        {"title": "Funda para 8BitDo Ultimate 2", "source": "PcComponentes", "extracted_price": 9.99},
+    ]})
+    client = SerpApiClient("clave-falsa", session=session)
+    client._sleep = lambda s: None
+    offers = client.shopping("8BitDo Ultimate 2", model="Ultimate 2")
+    assert session.calls == 2
+    assert [o.title for o in offers] == ["Mando 8BitDo Ultimate 2"]   # la funda, fuera
